@@ -1,0 +1,33 @@
+from modular_build import IceSystem
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import root, curve_fit
+from scipy.special import erf
+
+Lz = 1.
+space_steps = np.array([0.005, 0.001, 0.0005])
+Lxs = 3 * space_steps
+dts = np.array([1, 0.5, 0.1, 0.05, 0.01])
+
+Curves = []
+C = []
+
+Tsurf = 50.
+Tbot = 273.15
+
+dx = space_steps[0]
+Lx = Lxs[0]
+for i, dt in enumerate(dts):
+	ice = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dx, cpT=False, kT=False)
+	ice.init_T(Tsurf=Tsurf, Tbot=Tbot)
+	ice.T[1:, :] = 273.15
+	ice.phi[:, :] = 1.
+	ice.init_volume_averages()
+	ice.set_boundayconditions(sides='Reflect')
+	ice.stefan_compare(dt)
+
+	Curves.append(np.asarray(ice.freeze_front))
+	C.append(curve_fit(lambda x, C: C * np.sqrt(x), np.asarray(ice._time_), Curves[i])[0])
+
+time = np.asarray(ice._time_)
+norm_time = time / (max(time) - min(time))
