@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 5/8/19, 11:15pm
+# Last updated: 5/14/19
 # Modular build for 2d heat diffusion problem
 #   applied to liquid water in the ice shell of Europa
 
@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time as _timer_
 import seaborn as sns
+from save_load_model import *
 
 sns.set(palette='colorblind', color_codes=1, context='notebook', style='ticks')
 
@@ -38,38 +39,24 @@ class HeatSolver:
 		- Change tolerances
 			model.Ttol = 0.001
 			model.phitol = 0.0001
+			model.Stol = 0.0001
 	'''
 	# off and on options
 	tidalheat = 0  # turns off or on tidalheating component
 	Ttol = 0.1  # temperature tolerance
 	phitol = 0.01  # liquid fraction tolerance
+	Stol = 0.1  # salinity tolerance
 	latentheat = 1  # choose enthalpy method to use
 	freezestop = 0  # stop simulation upon total solidification of sill
 
-	def stefan_solution(self, t, T1, T0):
-		'''
-		Analytical solution to Stefan problem, compares analytical solution to numerical solution calculated here
-		f
-		'''
-		from scipy import optimize
-		from scipy.special import erf
-		if T1 > T0:
-			kappa = self.constants.kw / (self.constants.cp_w * self.constants.rho_w)
-			Stf = self.constants.cp_w * (T1 - T0) / self.constants.Lf
-		elif T1 < T0:
-			T1, T0 = T0, T1
-			kappa = self.constants.ki / (self.constants.cp_i * self.constants.rho_i)
-			Stf = self.constants.cp_i * (T1 - T0) / self.constants.Lf
-		lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
+	def __init__(self):
+		self.model_time, self.run_time = 0, 0
 
-		self.stefan_zm = 2 * lam * np.sqrt(kappa * t)
-		self.stefan_zm_func = lambda time: 2 * lam * np.sqrt(kappa * time)
-		self.stefan_zm_const = 2 * lam * np.sqrt(kappa)
-		# self.stefan_time_frozen = (self.thickness / (2 * lam)) ** 2 / kappa
-		self.stefan_z = np.linspace(0, self.stefan_zm)
-		self.stefan_T = T1 - (T1 - T0) * erf(self.stefan_z / (2 * np.sqrt(kappa * t))) / erf(lam)
+	class outputs:
+		h = []
+		Ra = []
 
-	def set_boundayconditions(self, top=True, bottom=True, sides=True):
+	def set_boundaryconditions(self, top=True, bottom=True, sides=True):
 		'''
 			Set boundary conditions for heat solver
 			top : top boundary conditions
@@ -91,21 +78,37 @@ class HeatSolver:
 
 	def update_salinity(self, phi_last):
 		if self.issalt:
-			new_ice = np.where((phi_last != 0) and (self.phi == 0))
-			if self.S[new_ice] == self.saturation_point:
-				self.saturated = 1
-				return 0
+			new_ice = np.where((phi_last > 0) & (self.phi == 0))
+			water = np.where(self.phi >= self.rejection_cutoff)
+			rejected_salt = 0
 			if len(new_ice[0]) > 0:
-				S_old = self.S.copy()
-				dTx = (self.T[1:-1, new_ice[0] + 1] - self.T[1:-1, new_ice[0] - 1]) / self.dx
-				dTz = (self.T[new_ice[0] + 1, 1:-1] - self.T[new_ice[0] - 1, 1:-1]) / self.dz
-				dT = max(dTx, dTz)
-				# use maximum gradient in x or z directions to determine amount of entrained salt in ice
-				self.S[new_ice] = self.entrained_salt(dT, S_old[new_ice])
-				rejected_salt = sum(S_old[new_ice] - self.S[new_ice])
-				water = np.where(self.phi >= self.rejection_cutoff)
-				self.S[water] = self.S[water] + rejected_salt / len(self.S[water])
-				self.total_salt.append(sum(self.S))
+				for i in range(len(new_ice[0])):
+					S_old = self.S[new_ice[0][i], new_ice[1][i]]
+					dTx = abs(self.T[new_ice[0][i], new_ice[1][i] - 1] - self.T[new_ice[0][i], new_ice[1][i] + 1]) / (
+							2 * self.dx)
+					dTz = (self.T[new_ice[0][i] - 1, new_ice[1][i]] - self.T[new_ice[0][i] + 1, new_ice[1][i]]) / (
+								2 * self.dz)
+					if dTz > 0:
+						self.S[new_ice[0][i], new_ice[1][i]] = S_old
+					else:
+						self.S[new_ice[0][i], new_ice[1][i]] = self.entrain_salt(np.hypot(dTx, dTz), S_old)
+						rejected_salt += S_old - self.S[new_ice[0][i], new_ice[1][i]]
+				vol = np.shape(water)[1]
+				self.S[water] = self.S[water] + rejected_salt / vol
+
+			# check mass conservation
+			total_S_new = self.S.sum()
+			if abs(total_S_new - self.total_salt[-1]) <= self.Stol:
+				self.total_salt.append(total_S_new)
+			else:
+				raise Exception('Mass not being conserved')
+
+			if (self.S[water] >= self.saturation_point).all():
+				print('water is fully saturated')
+				return 1
+			else:
+				return 0
+
 
 	def update_liquid_fraction(self, phi_last):
 		if self.issalt == True:
@@ -118,24 +121,13 @@ class HeatSolver:
 			H <= Hs + self.constants.Lf]) / self.constants.Lf
 		self.phi[H < Hs] = 0.
 		self.phi[H > Hs + self.constants.Lf] = 1
-		'''
-		# enthalpy lower than solid ice => ice
-		self.phi[H < Hs] = 0.
-		# enthalpy higher than liquid enthalpy => water
-		self.phi[H > Hs + self.constants.Lf] = 1.
-		# find in-between
-		idx = np.where((H >= Hs) and (H <= Hs + self.constants.Lf))
-		if type(Hs) != type(self.phi):
-			self.phi[idx] = (H[idx] - Hs) / self.constants.Lf
-		else:
-			self.phi[idx] = (H[idx] - Hs[idx]) / self.constants.Lf
-		'''
 
 	def update_volume_averages(self):
 		if self.kT == True:
 			self.k = (1 - self.phi) * (self.constants.ac / self.T) + self.phi * self.constants.kw
 		else:
 			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
+
 		if self.cpT == True:
 			self.cp_i = 185. + 7.037 * self.T
 
@@ -148,7 +140,6 @@ class HeatSolver:
 			            + self.phi * self.constants.rho_w * self.constants.cp_w
 
 	def update_sources_sinks(self, phi_last, T_last):
-		# probably need to use T last rather than the newly
 		self.latent_heat = self.constants.rho_i * self.constants.Lf * \
 		                   (self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1]) / self.dt
 
@@ -170,11 +161,11 @@ class HeatSolver:
 	def apply_boundary_conditions(self, T):
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
-			self.T[-1, :] = self.Tbot
+			self.T[-1, 1:-1] = self.Tbot
 
 		# apply chosen boundary conditions at top of domain
 		if self.topBC == True:
-			self.T[0, :] = self.Tsurf
+			self.T[0, 1:-1] = self.Tsurf
 
 		elif self.topBC == 'Radiative':
 			c = self.dt / (2 * self.rhoc[0, 1:-1])
@@ -188,50 +179,14 @@ class HeatSolver:
 
 		# apply chosen boundary conditions at sides of domain
 		if self.sidesBC == True:
-			self.T[:, 0] = self.Tedge
-			self.T[:, self.nx - 1] = self.Tedge
-
-		elif self.sidesBC == 'NoFlux':
-			# not sure this works quite right
-			# left side
-			c = self.dt / (2 * self.rhoc[1:-1, 0])
-			Tlx = c / self.dx ** 2 * (self.k[1:-1, 1] + self.k[1:-1, 0]) * (T[1:-1, 1] - T[1:-1, 0])
-			Tlz = c / self.dz ** 2 * ((self.k[2:, 0] + self.k[1:-1, 0]) * (T[2:, 0] - T[1:-1, 0]) \
-			                          - (self.k[1:-1, 0] + self.k[:-2, 0]) * (T[1:-1, 0] - T[:-2, 0]))
-			self.T[1:-1, 0] = T[1:-1, 0] + Tlx + Tlz + self.dt * self.Q[:, 0] / self.rhoc[1:-1, 0]
-
-			# right side
-			c = self.dt / (2 * self.rhoc[1:-1, -1])
-			Trx = c / self.dx ** 2 * -(self.k[1:-1, -1] + self.k[1:-1, - 1]) \
-			      * (T[1:-1, -1] - T[1:-1, -2])
-			Trz = c / self.dz ** 2 * ((self.k[2:, - 1] + self.k[1:-1, - 1]) \
-			                          * (T[2:, - 1] - T[1:-1, - 1]) - (self.k[1:-1, - 1] + self.k[:-2, -1]) \
-			                          * (T[1:-1, -1] - T[:-2, -1]))
-			self.T[1:-1, -1] = T[1:-1, - 1] + Trx + Trz \
-			                   + self.Q[:, -1] * self.dt / self.rhoc[1:-1, -1]
-
-			if self.topBC == 'Radiative':
-				# make sure cell in top left corner doesn't get fucked up
-				c = self.dt / (2 * self.rhoc[0, 0])
-				T_TLCz = c / self.dz ** 2 * (
-						(self.k[1, 0] + self.k[0, 0]) * (T[1, 0] - T[0, 0]) - 2 * self.dz * self.constants.emiss * \
-						self.constants.stfblt * (T[0, 0] - self.Tsurf) ** 4)
-				T_TLCx = c / self.dx ** 2 * (self.k[0, 1] + self.k[0, 0]) * (T[0, 1] - T[0, 0])
-				self.T[0, 0] = T[0, 0] + T_TLCx + T_TLCz + self.dt * self.Q[0, 0] / self.rhoc[0, 0]
-
-				# make sure cell in top right corner doesn't get fucked up
-				c = self.dt / (2 * self.rhoc[0, -1])
-				T_TRCz = c / self.dz ** 2 * ((self.k[1, -1] + self.k[0, -1]) * (T[1, -1] - T[0, -1]) - 2 * self.dz *
-				                             self.constants.emiss * self.constants.stfblt * (T[0, -1] - self.Tsurf)
-				                             ** 4)
-				T_TRCx = -c / self.dx ** 2 * (self.k[0, -2] + self.k[0, -1]) * (T[0, -1] - T[1, -1])
-				self.T[0, -1] = T[0, -1] + T_TRCx + T_TRCz + self.dt * self.Q[0, -1] / self.rhoc[0, -1]
+			self.T[:, 0] = self.Tedge.copy()
+			self.T[:, self.nx - 1] = self.Tedge.copy()
 
 		elif self.sidesBC == 'Reflect':
-			self.T[:, 0] = self.T[:, 1]
-			self.T[:, -1] = self.T[:, -2]
+			self.T[:, 0] = self.T[:, 1].copy()
+			self.T[:, -1] = self.T[:, -2].copy()
 
-	def outputs(self):
+	def get_outputs(self):
 		'''
 		choose which outputs to track
 		'''
@@ -272,10 +227,9 @@ class HeatSolver:
 
 	def solve_heat(self, nt, dt):
 		self.dt = dt
-		self.model_time, self.run_time = 0, 0
 		start_time = _timer_.clock()
 
-		# self.print_at_start(nt)
+		self.print_at_start(nt)
 
 		for n in range(nt):
 			TErr, phiErr = np.inf, np.inf
@@ -284,7 +238,10 @@ class HeatSolver:
 				T_last, phi_last = self.T.copy(), self.phi.copy()
 
 				self.update_liquid_fraction(phi_last=phi_last)
-				self.update_salinity(phi_last=phi_last)
+				self.saturated = self.update_salinity(phi_last=phi_last)
+				if self.saturated == 1:
+					print('water is saturated')
+					break
 				self.update_volume_averages()
 
 				# constant in front of x-terms
@@ -323,36 +280,54 @@ class HeatSolver:
 				print('sill is saturated')
 				return self.model_time
 
-			self.run_time += _timer_.clock() - start_time
+		self.run_time += _timer_.clock() - start_time
 
-	def stefan_compare(self, dt):
+	class stefan:
 		'''
-		Compare simulation freezing front propagation zm(t) with stefan solution
-		Parameters:
-				dt : float
-					time step
+		Solutions to analytical two-phase heat diffusion problem for comparison
 		'''
-		self.dt = dt
-		self.set_boundayconditions(top=True, bottom=True, sides='Reflect')
-		self._time_ = [0]
-		self.freeze_front = [0]
-		midx = int(np.floor(len(self.X[0, :]) / 2))
-		n = 1
 
-		while self.freeze_front[-1] <= 0.9 * self.Lz:
-			self.solve_heat(nt=1, dt=self.dt)
-			if (self.phi == 0).any():
-				idx = np.max(np.where(self.phi == 0))
-				if self.Z[idx, midx] != self.freeze_front[-1]:
-					self.freeze_front.append(self.Z[idx, midx])
-					print(idx, midx)
-					self._time_.append(n * self.dt)
-			else:
-				self.freeze_front.append(0)
-				self._time_.append(n * self.dt)
-			n += 1
+		def solution(self, t, T1, T0):
+			from scipy import optimize
+			from scipy.special import erf
+			if T1 > T0:
+				kappa = self.constants.kw / (self.constants.cp_w * self.constants.rho_w)
+				Stf = self.constants.cp_w * (T1 - T0) / self.constants.Lf
+			elif T1 < T0:
+				T1, T0 = T0, T1
+				kappa = self.constants.ki / (self.constants.cp_i * self.constants.rho_i)
+				Stf = self.constants.cp_i * (T1 - T0) / self.constants.Lf
+			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
 
-		self.stefan_solution(t=n * self.dt, T1=self.Tsurf, T0=self.Tbot)
+			self.stefan.zm = 2 * lam * np.sqrt(kappa * t)
+			self.stefan.zm_func = lambda time: 2 * lam * np.sqrt(kappa * time)
+			self.stefan.zm_const = 2 * lam * np.sqrt(kappa)
+			# self.stefan_time_frozen = (self.thickness / (2 * lam)) ** 2 / kappa
+			self.stefan.z = np.linspace(0, self.stefan.zm)
+			self.stefan.T = T1 - (T1 - T0) * erf(self.stefan.z / (2 * np.sqrt(kappa * t))) / erf(lam)
+
+		def compare(self, dt):
+			self.dt = dt
+			self.set_boundaryconditions(top=True, bottom=True, sides='Reflect')
+			self.stefan.time = [0]
+			self.stefan.freeze_front = [0]
+			midx = int(np.floor(len(self.X[0, :]) / 2))
+			n = 1
+
+			while self.stefan.freeze_front[-1] <= 0.9 * self.Lz:
+				self.solve_heat(nt=1, dt=self.dt)
+				if (self.phi == 0).any():
+					idx = np.max(np.where(self.phi == 0))
+					if self.Z[idx, midx] != self.stefan.freeze_front[-1]:
+						self.stefan.freeze_front.append(self.Z[idx, midx])
+						self.stefan.time.append(n * self.dt)
+				else:
+					self.stefan.freeze_front.append(0)
+					self.stefan.time.append(n * self.dt)
+				n += 1
+
+			self.stefan.solution(self, t=n * self.dt, T1=self.Tsurf, T0=self.Tbot)
+
 
 
 class IceSystem(HeatSolver, Plotter):
@@ -417,7 +392,7 @@ class IceSystem(HeatSolver, Plotter):
 		eps0 = 2e-5  # maximum tidal flexing strain
 		omega = 1.5e-5  # 1/s, tidal flexing frequency
 		visc0i = 1e13  # Pa s, minimum reference ice viscosity at T=Tm
-		visc0w = 1.7e6  # Pa s, dynamic viscosity of water at 0 K
+		visc0w = 1.3e-3  # Pa s, dynamic viscosity of water at 0 K
 
 		# Mechanical properties of ice
 		G = 3.52e9  # Pa, shear modulus/rigidity (Moore & Schubert, 2000)
@@ -431,42 +406,6 @@ class IceSystem(HeatSolver, Plotter):
 		if self.kT:
 			self.k_initial = self.phi_initial * self.constants.kw + (1 - self.phi_initial) * \
 			                 self.constants.ac / self.T_initial
-
-	def init_T(self, Tsurf, Tbot, profile='non-linear'):
-		'''
-			Initialize temperature profile
-			Parameters:
-				Tsurf : float
-					surface temperature
-				Tbot : float
-					temperature at bottom of domain
-				profile: defaults 'non-linear', 'linear'
-					prescribed temperature profile
-					'non-linear' -- expected equilibrium thermal gradient with k(T)
-					'linear'     -- equilibirium thermal gradient for constant k
-			Returns:
-				T : (nz,nx) array
-					grid of temperature values
-		'''
-		# set melting temperature to default
-		self.Tm = self.constants.Tm * self.T.copy()
-
-		if isinstance(profile, str):
-			if profile == 'non-linear':
-				self.T = Tsurf * (Tbot / Tsurf) ** (abs(self.Z / self.Lz))
-			elif profile == 'linear':
-				self.T = (Tbot - Tsurf) * abs(self.Z / self.Lz) + Tsurf
-			print('init_T(Tsurf = {}, Tbot = {})'.format(Tsurf, Tbot))
-			print('\t Temperature profile initialized to {}'.format(profile))
-		else:
-			self.T = profile
-			print('init_T: custom profile implemented')
-		# save boundaries for dirichlet or other
-		# left and right boundaries
-		self.Tedge = self.T[:, 0] = self.T[:, -1]
-		self.Tsurf = Tsurf
-		self.Tbot = Tbot
-		# self.save_initials()
 
 	def init_volume_averages(self):
 		'''
@@ -492,6 +431,48 @@ class IceSystem(HeatSolver, Plotter):
 			self.rhoc = (1 - self.phi) * self.constants.rho_i * self.cp_i \
 			            + self.phi * self.constants.rho_w * self.constants.cp_w
 		self.save_initials()
+
+	def init_T(self, Tsurf, Tbot, profile='non-linear'):
+		'''
+			Initialize temperature profile
+			Parameters:
+				Tsurf : float
+					surface temperature
+				Tbot : float
+					temperature at bottom of domain
+				profile: defaults 'non-linear', 'linear'
+					prescribed temperature profile
+					'non-linear' -- expected equilibrium thermal gradient with k(T)
+					'linear'     -- equilibirium thermal gradient for constant k
+			Returns:
+				T : (nz,nx) array
+					grid of temperature values
+		'''
+		# set melting temperature to default
+		self.Tm = self.constants.Tm * self.T.copy()
+
+		if isinstance(profile, str):
+			if profile == 'non-linear':
+				self.T = Tsurf * (Tbot / Tsurf) ** (abs(self.Z / self.Lz))
+			elif profile == 'linear':
+				self.T = (Tbot - Tsurf) * abs(self.Z / self.Lz) + Tsurf
+			elif profile == 'stefan':
+				self.T[0, :] = Tsurf
+				self.T[1:, :] = Tbot
+				self.phi[:, :] = 1
+				profile += ' plus domain all water'
+			print('init_T(Tsurf = {}, Tbot = {})'.format(Tsurf, Tbot))
+			print('\t Temperature profile initialized to {}'.format(profile))
+
+		else:
+			self.T = profile
+			print('init_T: custom profile implemented')
+		# save boundaries for dirichlet or other
+		# left and right boundaries
+		self.Tedge = self.T[:, 0] = self.T[:, -1]
+		self.Tsurf = Tsurf
+		self.Tbot = Tbot
+		self.init_volume_averages()
 
 	def set_intrusion_geom(self, depth, thickness, radius, geometry='ellipse'):
 		'''
@@ -544,7 +525,7 @@ class IceSystem(HeatSolver, Plotter):
 		self.init_volume_averages()
 
 	def init_salinity(self, S=None, composition='Europa', concentration=12.3, a_rho=0.75, b_rho=-0.0375,
-	                  rejection_cutoff=0.9):
+	                  rejection_cutoff=0.25):
 		'''
 		Initialize salinity in the model
 		-- add a way to include background salinity profile ala Buffo et. al (2019)
@@ -576,30 +557,32 @@ class IceSystem(HeatSolver, Plotter):
 		self.composition = composition
 		self.concentration = concentration
 
+		# non-linear fit, for larger dT
+		self.shallow_fit = lambda dT, a, b, c, d: a + b * (dT + c) * \
+		                                          (1 - np.exp(-d / dT)) / (1 + dT)
+		# linear fit, for small dT
+		self.linear_fit = lambda dT, a, b: a + b * dT
+
+		if self.composition == 'Europa':
+				self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + self.constants.Tm
+		elif self.composition == 'Earth':
+			self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + self.constants.Tm
+
 		if S is not None:
 			# use input S as background salinity?
 			self.S = S
 		else:
-			self.shallow_fit = lambda dT, a, b, c, d: a + b * (dT + c) * \
-			                                          (1 - np.exp(-d / dT)) / (1 + dT)
-			# linear fit, for small dT/dz
-			self.linear_fit = lambda dT, a, b: a + b * dT
-
 			# homogenous brine, pure ice shell
 			self.S = self.phi * concentration
-
-			# Melting temperature based on curve fit from FREEZCHEM for compositions
-			if self.composition == 'Europa':
-				self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + self.constants.Tm
-			elif self.composition == 'Earth':
-				self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + self.constants.Tm
-
-			# update initial melting temperature
-			self.Tm = self.Tm_func(self.S)
-			self.init_volume_averages()
-			self.total_salt = [sum(self.S)]
+		# update initial melting temperature
+		self.Tm = self.Tm_func(self.S)
+		self.init_volume_averages()
+		self.total_salt = [self.S.sum()]
 
 	def entrain_salt(self, dT, S, composition='Europa'):
+		'''
+
+		'''
 		from scipy import optimize
 		if composition != 'Europa':
 			raise Exception('Run some Earth tests you dummy')
@@ -614,20 +597,21 @@ class IceSystem(HeatSolver, Plotter):
 				elif dT < switch_dT:
 					return self.linear_fit(dT, *self.linear_consts[composition][S])
 			elif 12.3 < S < 100:
-				ans = S * (self.entrained_S(dT, 100, composition) - self.entrained_S(dT, 12.3, composition)) / (
+				ans = S * (self.entrain_salt(dT, 100, composition) - self.entrain_salt(dT, 12.3, composition)) / (
 						100 - 12.3)
-				return ans + self.entrained_S(dT, 12.3, composition)
+				return ans + self.entrain_salt(dT, 12.3, composition)
 			elif 100 < S < 282:
-				ans = S * (self.entrained_S(dT, 282, composition) - self.entrained_S(dT, 100, composition)) / (
+				ans = S * (self.entrain_salt(dT, 282, composition) - self.entrain_salt(dT, 100, composition)) / (
 						282 - 100)
-				return ans + self.entrained_S(dT, 100, composition)
+				return ans + self.entrain_salt(dT, 100, composition)
 
-			else:
-				ans = np.zeros(len(dT))
-				for i in range(len(dT)):
-					ans[i] = self.entrained_S(dT[i], S[i], composition)
-				return ans
+		else:
+			ans = np.zeros(len(dT))
+			for i in range(len(dT)):
+				ans[i] = self.entrain_salt(dT[i], S[i], composition)
+			return ans
 
 	def cheater_domain(self):
 		# find a way to cheat on domain size to reduce run time
 		return 0
+

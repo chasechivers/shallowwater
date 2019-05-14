@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 Lz = 1.
-Lx = 0.015
-dx = dz = 0.005
+dx = dz = 0.01
+Lx = 3 * dx
 dt = 0.1
 
 Tsurf = 50.

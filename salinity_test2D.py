@@ -1,26 +1,42 @@
-from one_dimension.modular_1D import IceSystem
+from modular_build import IceSystem
+import numpy as np
+import matplotlib.pyplot as plt
 import seaborn as sns
 
-sns.set(palette='colorblind', style='whitegrid', context='notebook')
+sns.set(palette='colorblind', style='ticks', context='notebook')
 
 Lz = 5e3
-Lx = 10e3
-dz = 10
-dt = 3.14e7 / (24)
-Ttop = 50
+Lx = 6e3
+dz = dx = 10
+dt = 3.14e7 / (24 * 4)
+Tsurf = 50
 Tbot = 273.15
 depth = 1e3
-thick = 1e3
+thick = 0.5e3
+R = 2.4 * depth
 
-ice = IceSystem(Lz, dz)
-ice.init_T(Ttop, Tbot)
-ice.init_sill(Tbot, depth, thick)
-ice.init_S(concentration=12.3)
-ice.set_BC()
-
-ice = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dz, cpT=False, kT=False)
+ice = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dz)
 ice.init_T(Tsurf=Tsurf, Tbot=Tbot)
-ice.init_intrusion(T=300, depth=depth, thickness=thick, radius=R)
-ice.init_
-ice.set_boundayconditions(sides='NoFlux')
-ice.solve_heat(nt=100000, dt=dt)
+ice.init_intrusion(T=273.15, depth=depth, thickness=thick, radius=R)
+ice.init_salinity(concentration=12.3)
+ice.set_boundaryconditions(sides='Reflect')
+ice.solve_heat(nt=50000, dt=dt)
+
+plt.figure()
+plt.pcolor(ice.X, ice.Z, np.log(ice.S), cmap='cividis')
+plt.colorbar()
+plt.gca().invert_yaxis()
+plt.show()
+
+t = np.linspace(0, len(ice.total_salt), len(ice.total_salt))
+plt.figure()
+plt.plot(t, ice.total_salt[0] - ice.total_salt)
+plt.show()
+
+plt.figure()
+plt.plot(ice.S[:, 350], ice.Z[:, 350], 'k')
+plt.plot(ice.S[:, 125], ice.Z[:, 0], 'r')
+plt.xlabel('ppt')
+plt.ylabel('depth, m')
+plt.gca().invert_yaxis()
+plt.show()
