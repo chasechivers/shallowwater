@@ -357,7 +357,7 @@ class HeatSolver:
 				print('2 sill is saturated')
 				self.freeze_time = n * self.dt
 				break
-			self.get_outputs(n, OF=100)
+		# self.get_outputs(n, OF=100)
 		if self.issalt is True and self.saturated == 1:
 			print('3 sill is saturated')
 			self.freeze_time = n * self.dt
