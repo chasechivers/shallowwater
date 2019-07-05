@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/3/19
+# Last updated: 7/5/19
 # Modular build for 2d heat diffusion problem
 #   applied to liquid water in the ice shell of Europa
 
