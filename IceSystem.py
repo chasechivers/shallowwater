@@ -16,8 +16,16 @@ from HeatSolver import HeatSolver
 
 
 class IceSystem(HeatSolver):
-	def __init__(self, Lx, Lz, dx, dz, kT=True, cpT=True, use_X_symmetry=False):
-		'''
+	"""
+	Class with methods to set up initial conditions for two-dimensional, two-phase thermal diffusion model that
+	includes temperature-dependent conductivity and salinity. Includes the HeatSolver class used to solve the heat
+	equation utilizing an enthalpy method (Huber et al., 2008) to account for latent heat from phase change as well
+	as a parameterization for a saline system.
+	"""
+
+	def __init__(self, Lx, Lz, dx, dz, kT=True, cpT=False, use_X_symmetry=False):
+		"""
+		Initialize the system.
 		Parameters:
 			Lx : float
 				length of horizontal spatial domain, m
@@ -27,16 +35,22 @@ class IceSystem(HeatSolver):
 				horizontal spatial step size, m
 			dz : float
 				vertical spatial step size, m
-			cpT : binary
+			cpT : bool
 			    choose whether to use temperature-depedent specific heat,
-			    default = 1, temperature-dependent, cp_i = 185 + 7*T (citation)
-			kT : binary
+			    default = False.
+			    True: temperature-dependent, cp_i = 185 + 7*T (Hesse et al., 2019)
+			kT : bool
 			    choose whether to use temperature-dependent thermal conductivity,
-			    default = 1, temperature-dependent, k=ac/T (Petrenko, Klinger, etc.)
+			    default = True, temperature-dependent, k=ac/T (Petrenko, Klinger, etc.)
 			use_X_symmetry : binary
 				assume the system is symmetric about the center of the sill
 				* NOTE: Must use Reflecting boundary condition for sides if using this
-		'''
+
+		Usage:
+			Ice Shell is 40 km thick and 40 km wide at a spatial discretization of 50 m.
+				model = IceSystem(40e3, 40e3, 50, 50)
+		"""
+
 		self.Lx, self.Lz = Lx, Lz
 		self.dx, self.dz = dx, dz
 		self.nx, self.nz = int(Lx / dx + 1), int(Lz / dz + 1)
@@ -58,6 +72,10 @@ class IceSystem(HeatSolver):
 		self.issalt = False  # salt IO
 
 	class constants:
+		"""
+		No-methods class used for defining constants in a simulation. May be changed inside here or as an
+		instance during simulation runs.
+		"""
 		styr = 3.14e7  # s/yr, seconds in a year
 
 		g = 1.32  # m/s2, Europa surface gravity
@@ -95,6 +113,8 @@ class IceSystem(HeatSolver):
 		E = 1e6  # Pa, Young's Modulus
 
 	def save_initials(self):
+		""" Save initial values to compare with simulation results. """
+
 		self.T_initial = self.T.copy()
 		self.Tm_initial = self.Tm.copy()
 		self.phi_initial = self.phi.copy()
@@ -106,9 +126,10 @@ class IceSystem(HeatSolver):
 			self.k_initial = self.phi_initial * self.constants.kw + (1 - self.phi_initial) * self.constants.ki
 
 	def init_volume_averages(self):
-		'''
-		Initialize volume averaged values over the domain. Must be used if not using an intrusion
-		'''
+		"""
+		Initialize volume averaged values over the domain. In practice, this is automatically called by any future
+		function that are changing physical parameters such as liquid fraction, salinity or temperature.
+		"""
 
 		if self.kT:
 			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
@@ -133,7 +154,7 @@ class IceSystem(HeatSolver):
 		self.save_initials()
 
 	def init_T(self, Tsurf, Tbot, profile='non-linear'):
-		'''
+		"""
 		Initialize temperature profile
 			Parameters:
 				Tsurf : float
@@ -144,11 +165,12 @@ class IceSystem(HeatSolver):
 					prescribed temperature profile
 					'non-linear' -- expected equilibrium thermal gradient with k(T)
 					'linear'     -- equilibirium thermal gradient for constant k
-					'stefan'     -- sets up stefan problem temperature profile
+					'stefan'     -- sets up the freezing stefan problem temperature profile
+									in this instance, Tbot should be the melting temperature
 			Returns:
 				T : (nz,nx) array
 					grid of temperature values
-		'''
+		"""
 		# set melting temperature to default
 		self.Tm = self.constants.Tm * self.T.copy()
 
@@ -158,9 +180,9 @@ class IceSystem(HeatSolver):
 			elif profile == 'linear':
 				self.T = (Tbot - Tsurf) * abs(self.Z / self.Lz) + Tsurf
 			elif profile == 'stefan':
-				self.T[0, :] = Tsurf
-				self.T[1:, :] = Tbot
-				self.phi[:, :] = 1
+				self.T[0, :] = Tsurf  # set the very top of grid to surface temperature
+				self.T[1:, :] = Tbot  # everything below is at the melting temperature
+				self.phi[:, :] = 1  # everything starts as liquid
 				profile += ' plus domain all water'
 			print('init_T(Tsurf = {}, Tbot = {})'.format(Tsurf, Tbot))
 			print('\t Temperature profile initialized to {}'.format(profile))
@@ -168,6 +190,7 @@ class IceSystem(HeatSolver):
 		else:
 			self.T = profile
 			print('init_T: custom profile implemented')
+
 		# save boundaries for dirichlet or other
 		# left and right boundaries
 		self.Tedge = self.T[:, 0] = self.T[:, -1]
@@ -176,10 +199,12 @@ class IceSystem(HeatSolver):
 		self.init_volume_averages()
 
 	def set_intrusion_geom(self, depth, thickness, radius, geometry='ellipse'):
-		'''
-		Sets geometry of intrusion. In practice, is automatically called by init_intrusion().
-		Creates matrix geom for manipulation inside simulation and outside for more customization
-		'''
+		"""
+		Sets geometry of intrusion. In practice, is automatically called by init_intrusion() and generally unneeded
+		to be called in simulation script. Creates tuple IceSystem.geom that holds the initial intrusion grid indices for
+		manipulation inside simulation and outside for more customization.
+		"""
+
 		if isinstance(geometry, str):
 			if geometry == 'ellipse':
 				center = thickness / 2 + depth
@@ -203,16 +228,19 @@ class IceSystem(HeatSolver):
 				tmp[z.min():z.max(), r.min():r.max() + 1] = 1
 				self.geom = np.where(tmp == 1)
 				del tmp, r, z
+
+		# option for a custom geometry
 		else:
 			self.geom = geometry
 
 	def init_intrusion(self, T, depth, thickness, radius, phi=1, geometry='ellipse'):
-		'''
+		"""
 		Initialize intrusion properties.
 		**So far this only accounts for a single intrusion at the center of the domain
-			should be simple to add multiples in the future.
+			should be simple to add multiples in the future if necessary
 		Updates volume averages after initialization: means we can just initialize temperature and intrusion to get
-		all thermal properties set
+		all thermal properties set.
+
 		Parameters:
 			T : float
 				set intrusion to single Temperature value, assuming that it is well mixed
@@ -222,26 +250,36 @@ class IceSystem(HeatSolver):
 				set thickness of intrusion, m
 			radius : float
 				set radius of intrusion, m
+			phi : float [0,1]
+				set liquid fraction of sill, generally interested in totally liquid bodies so default = 1
 			geometry : string (see set_sill_geom()), array
 				set geometry of intrusion, default is an ellipse
-		'''
+
+		Usage:
+			Intrusion at pure water melting temperature (273.15 K), emplaced at 2 km depth in the shell, 2 km thick
+			and a radius of 4 km:
+			model.init_intrusion(T=273.15, depth=2e3, thickness=2e3, radius=4e3)
+		"""
+
 		if phi < 0 or phi > 1:
 			raise Exception('liquid fraction must be between 0 and 1')
 
+		# save intrusion properties
 		self.Tsill = T
 		self.depth, self.thickness, self.R_int = depth, thickness, radius
-		self.set_intrusion_geom(depth, thickness, radius, geometry)
-		self.T[self.geom] = T
-		self.phi[self.geom] = phi
-		self.init_volume_averages()
+		self.set_intrusion_geom(depth, thickness, radius, geometry)  # get chosen geometry
+		self.T[self.geom] = T  # set intrusion temperature to chosen temperature
+		self.phi[self.geom] = phi  # set intrusion to chosen liquid fraction
+		self.init_volume_averages()  # update volume averages
 
 	def init_salinity(self, S=None, composition='MgSO4', concentration=12.3, rejection_cutoff=0.25, shell=False,
 	                  in_situ=False, T_match=True):
-		'''
-		Initialize salinity in the model
+		"""
+		Initialize salinity properties for simulations.
 		Parameters:
 			S : (nz,nx) grid
-				Necessary for a custom background salinity or other configurations
+				Necessary for a custom background salinity or other configurations, e.g. a super saline layer
+				-> though this could be done outside of this command so....
 			composition : string
 				Choose which composition the liquid should be.
 				Options: 'MgSO4', 'NaCl'
@@ -264,7 +302,15 @@ class IceSystem(HeatSolver):
 				Option to adjust the temperature profile to make the bottom be at the melting temperature of an ocean
 				with the same composition and concentration. This is mostly used if making the assumption that the
 				brittle layer simulated here is directly above the ocean.
-		'''
+
+		Usage:
+			Pure shell, saline intrusion: Intrusion with 34 ppt NaCl salinity
+				model.init_intrusion(composition='NaCl',concentration=12.3)
+
+			Saline shell, in-situ melting: Ocean began with 100 ppt MgSO4 and intrusion has been created by in-situ
+			melting
+				model.init_intrusion(composition='MgSO4', concentration=100., shell=True, in_situ=True)
+		"""
 
 		self.issalt = True  # turn on salinity for solvers
 		self.saturated = 0  # whether liquid is saturated
@@ -310,32 +356,40 @@ class IceSystem(HeatSolver):
 		# linear fit, for small dT
 		self.linear_fit = lambda dT, a, b: a + b * dT
 
-		# from FREEZCHEM for MgSO4 and NaCl
 		if self.composition == 'MgSO4':
+			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for MgSO4
 			self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + self.constants.Tm
 			# density changes for water w/ concentration of salt below
 			self.C_rho = 1.145
 			self.Ci_rho = 7.02441855e-01
-			self.saturation_point = 282.  # ppt, saturation point of MgSO4 in water
+
+			self.saturation_point = 282.  # ppt, saturation concentration of MgSO4 in water
 			self.constants.rho_s = 2660.  # kg/m^3, density of MgSO4
 
+			self.constants.cp_w = 3985.
+
 		elif self.composition == 'NaCl':
+			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for NaCl
 			self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + self.constants.Tm
 			# linear fit for density change due to salinity S
 			self.C_rho = 0.8644
 			self.Ci_rho = 6.94487270e-01
-			self.saturation_point = 260.  # ppt, saturation point of NaCl in water
+
+			self.saturation_point = 260.  # ppt, saturation concentration of NaCl in water
 			self.constants.rho_s = 2160.  # kg/m^3, density of NaCl
 
 		if S is not None:
 			# method for custom salinity + brine inclusion
 			self.S = S
 			self.S += self.phi * concentration
+
 		if shell:
+			# automatically set the bottom temperature to Tm for salinity at the bottom
 			T_match = True
 			# method for a salinity/depth profile via Buffo et al. 2019
 			s_depth = lambda z, a, b, c: a + b / (c - z)
 			self.S = s_depth(self.Z, *self.depth_consts[composition][concentration])
+
 			if in_situ is False:  # for water emplaced in a salty shell
 				self.S += self.phi * concentration
 			else:  # must redistribute the salt evenly to simulate real in-situ melting
@@ -349,6 +403,7 @@ class IceSystem(HeatSolver):
 						raise Exception('problem with salt redistribution')
 				except AttributeError:
 					pass
+
 			# update temperature profile to reflect bottom boundary condition
 			if T_match:
 				self.Tbot = self.Tm_func(s_depth(self.Lz, *self.depth_consts[composition][concentration]))
@@ -381,28 +436,34 @@ class IceSystem(HeatSolver):
 		self.save_initials()
 
 	def entrain_salt(self, dT, S, composition='MgSO4'):
-		'''
+		"""
 		Calculate the amount of salt entrained in newly frozen ice that is dependent on the thermal gradient across
 		the ice (Buffo et al., 2019).
 		Parameters:
-			dT : float
-				temperature gradient across cell,
+			dT : float, array
+				temperature gradient across cell, or array of temperature gradients
 			S : float, array
-				salinity (ppt) of newly frozen cell
+				salinity (ppt) of newly frozen cell, or array of salinities
 			composition : string
 				salt composition,
-				options: 'Europa' = MgSO4; 'Earth' = NaCl
+				options: 'MgSO4', 'NaCl'
 		Returns:
-			amount of salt entrained in ice
-		'''
+			amount of salt entrained in ice, ppt
+			or array of salt entrained in ice, ppt
+
+		Usage:
+			See HeatSolver.update_salinity() function.
+		"""
 		if composition != 'MgSO4':
 			raise Exception('Run some Earth tests you dummy')
 
+		# get list of concentrations with known constants for constitutive equations
 		concentrations = [key for key in self.shallow_consts[composition]]
 		concentrations = np.sort(concentrations)
 
-		if isinstance(dT, (int, float)):
+		if isinstance(dT, (int, float)):  # if dT (and therefore S) is a single value
 			if S in concentrations:
+				# determine whether to use linear or shallow fit
 				switch_dT = optimize.root(lambda x: self.shallow_fit(x, *self.shallow_consts[composition][S]) \
 				                                    - self.linear_fit(x, *self.linear_consts[composition][S]), 3)['x'][
 					0]
@@ -411,7 +472,6 @@ class IceSystem(HeatSolver):
 				elif dT < switch_dT:
 					return self.linear_fit(dT, *self.linear_consts[composition][S])
 
-			# linearly interpolate between data fits
 			elif S not in concentrations:
 				c_min = concentrations[S > concentrations].max()
 				c_max = concentrations[S < concentrations].min()
@@ -419,9 +479,10 @@ class IceSystem(HeatSolver):
 				# linearly interpolate between the two concentrations at gradient dT
 				m, b = np.polyfit([c_max, c_min], [self.entrain_salt(dT, c_max, composition),
 				                                   self.entrain_salt(dT, c_min, composition)], 1)
+
 				return m * S + b
 
-		else:
+		else:  # recursively call this function to fill an array of the same length as input array
 			ans = np.zeros(len(dT))
 			for i in range(len(dT)):
 				ans[i] = self.entrain_salt(dT[i], S[i], composition)

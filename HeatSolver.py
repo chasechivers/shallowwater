@@ -1,3 +1,6 @@
+# Author: Chase Chivers
+# Last updated: 7/5/19
+
 import numpy as np
 import time as _timer_
 from utility_funcs import *
