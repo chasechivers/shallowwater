@@ -106,5 +106,6 @@ plt.plot(model.S[:,1], model.Z[:,1], label='final')
 plt.xlabel('ppt NaCl')
 plt.ylabel('Depth, m')
 plt.gca().invert_yaxis()
+plt.legend()
 plt.show()
 ```
