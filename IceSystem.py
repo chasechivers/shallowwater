@@ -210,12 +210,12 @@ class IceSystem(HeatSolver):
 				center = thickness / 2 + depth
 				try:
 					if self.symmetric:  # adjust geometry to make sure the center of the intrusion isn't on the boundary
-						_R_ = self.X + self.dx
-						center -= self.dz  # this ensures the top-most edge of the intrusion is at the right depth
+						_R_ = self.X - self.dx
+						thickness += self.dz
 				except AttributeError:
 					_R_ = self.X
 				self.geom = np.where((_R_ / radius) ** 2 + (self.Z - center) ** 2 / ((thickness / 2) ** 2) <= 1)
-				del center
+				del center, _R_
 			elif geometry == 'box':
 				try:
 					if self.symmetric:  # adjust geometry to make sure the center of the intrusion isn't on the boundary
@@ -318,6 +318,8 @@ class IceSystem(HeatSolver):
 
 		# composition and concentration coefficients for fits from Buffo et al. (2019)
 		# others have been calculated by additional runs using the model from Buffo et al. (2019)
+
+		# dict structure {composition: {concentration: [a,b,c,d]}}
 		self.shallow_consts = {'MgSO4': {0: [0., 0., 0., 0.],
 		                                 12.3: [12.21, -8.3, 1.836, 20.2],
 		                                 100: [22.19, -11.98, 1.942, 21.91],
@@ -328,12 +330,14 @@ class IceSystem(HeatSolver):
 		                                100: [0., 0., 0., 0.],
 		                                260: [0., 0., 0., 0.]}
 		                       }
+
+		# dict structure {composition: {concentration: [a,b]}}
 		self.linear_consts = {'MgSO4': {0: [0., 0.],
 		                                12.3: [1.0375, 0.40205],
 		                                100: [5.4145, 0.69992],
 		                                282: [14.737, 0.62319]},
 		                      'NaCl': {0: [0., 0.],
-		                               10: [0., 0.],
+		                               10: [1.4439, 0.1704],
 		                               34: [1.9231, 0.33668],
 		                               100: [0., 0.],
 		                               260: [0., 0.]}
