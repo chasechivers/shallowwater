@@ -22,7 +22,7 @@ model.init_T(Tsurf=surface_temp, Tbot=bot_temp, profile='linear')
 ```
 
 Visualize initial temperature profile
-```
+```python
 import matplotlib.pyplot as plt
 plt.pcolormesh(model.X, model.Y, model.T)
 plt.colorbar()
