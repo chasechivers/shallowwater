@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/5/19
+# Last updated: 7/8/19
 # Modular build for 2d heat diffusion problem
 #   applied to liquid water in the ice shell of Europa
 
@@ -30,7 +30,7 @@ class IceSystem(HeatSolver):
 			Lx : float
 				length of horizontal spatial domain, m
 			Lz : float
-				"depth of shell", length of vertical spatial domain, m
+				thickness of shell, length of vertical spatial domain, m
 			dx : float
 				horizontal spatial step size, m
 			dz : float
@@ -49,18 +49,20 @@ class IceSystem(HeatSolver):
 		Usage:
 			Ice Shell is 40 km thick and 40 km wide at a spatial discretization of 50 m.
 				model = IceSystem(40e3, 40e3, 50, 50)
+
+			See README
 		"""
 
 		self.Lx, self.Lz = Lx, Lz
 		self.dx, self.dz = dx, dz
 		self.nx, self.nz = int(Lx / dx + 1), int(Lz / dz + 1)
-		self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero
+		self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
 		if use_X_symmetry:
 			self.symmetric = True
 			self.Lx = self.Lx / 2
 			self.nx = int(self.Lx / self.dx + 1)
 			self.X = np.linspace(0, self.Lx, self.nx)
-			self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero
+			self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
 			self.X, self.Z = np.meshgrid(self.X, self.Z)  # create spatial grid
 		elif use_X_symmetry is False:
 			self.X = np.linspace(-self.Lx / 2, self.Lx / 2, self.nx)  # x domain centered on 0

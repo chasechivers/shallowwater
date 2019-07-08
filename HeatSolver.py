@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/5/19
+# Last updated: 7/8/19
 
 import numpy as np
 import time as _timer_
@@ -42,7 +42,7 @@ class HeatSolver:
 		"""Class structure to help define and calculate desired outputs of a simulation."""
 
 		def choose(self, all=False, T=False, phi=False, k=False, S=False, Q=False, h=False, r=False,
-		           freeze_fronts=False, percent_frozen=False, iterations=False, output_frequency=1000, output_list=[]):
+		           freeze_fronts=False, percent_frozen=False, output_frequency=1000, output_list=[]):
 			"""
 			Choose which outputs to track with time. Each variable is updated at the chosen output frequency and is
 			returned in the dictionary object outputs.transient_results.
@@ -80,7 +80,7 @@ class HeatSolver:
 					model.outputs.choose(model, output_list=['T','S'], output_frequency=1);
 			"""
 			to_output = {'T': T, 'phi': phi, 'k': k, 'S': S, 'Q': Q, 'h': h, 'freeze fronts': freeze_fronts, 'r': r,
-			             'percent frozen': percent_frozen, 'iterations': iterations}
+			             'percent frozen': percent_frozen}
 			if all: to_output = {key: True for key, value in to_output.items()}
 			if len(output_list) != 0:
 				for item in output_list: to_output[item] = True
@@ -96,7 +96,6 @@ class HeatSolver:
 
 		def calculate_outputs(self, n):
 			"""
-			--- THIS COULD PROBABLY BE WRITTEN MORE PYTHONIC
 			Calculates the output and appends it to the list for chosen outputs. See outputs.choose() for description
 			of values calculated here.
 			Parameters:
@@ -124,8 +123,6 @@ class HeatSolver:
 					tmp = np.where(self.phi > 0)
 					ans[key] = np.array([min(tmp[0]), max(tmp[0])]) * self.dz
 					del tmp
-				if key == 'iterations':
-					ans[key] = self.num_iter
 				if key == 'T':
 					ans[key] = self.T.copy()
 				if key == 'S':
@@ -144,7 +141,7 @@ class HeatSolver:
 				get = self.outputs.calculate_outputs(self, n)
 				save_data(get, self.outputs.tmp_data_file_name + '_n={}'.format(n), self.outputs.tmp_data_directory)
 
-		def get_all_data(self):
+		def get_all_data(self, del_files=True):
 			"""Concatenates all saved outputs from outputs.get_results() and puts into a single dictionary object."""
 			cwd = os.getcwd()  # find working directory
 			os.chdir(self.outputs.tmp_data_directory)  # change to directory where data is being stored
@@ -159,7 +156,7 @@ class HeatSolver:
 				for key in self.outputs.outputs:  # iterate over desired outputs
 					ans[key].append(tmp_dict[key])  # add output from result n to final file
 				del tmp_dict
-				os.remove(file)
+				if del_files: os.remove(file)
 
 			# make everything a numpy array for easier manipulation
 			for key in self.outputs.outputs:
@@ -409,6 +406,7 @@ class HeatSolver:
 		self.dt = dt
 		self.model_time = dt
 		start_time = _timer_.clock()
+		self.num_iter = []
 		if print_opts: self.print_all_options(nt)
 
 		for n in range(n0, n0 + nt):
@@ -446,7 +444,7 @@ class HeatSolver:
 					raise Exception('solution not converging')
 
 			# outputs here
-			self.num_iter = iter_k
+			self.num_iter.append(iter_k)
 			self.model_time = n * self.dt
 
 			try:  # save outputs
