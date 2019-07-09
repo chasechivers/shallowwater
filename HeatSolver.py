@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/5/19
+# Last updated: 7/8/19
 
 import numpy as np
 import time as _timer_
@@ -10,17 +10,16 @@ from scipy.special import erf
 
 
 class HeatSolver:
-	'''
+	"""
 	Solves two-phase thermal diffusivity problem with a temperature-dependent thermal conductivity of ice in
 	two-dimensions. Sources and sinks include latent heat of fusion and tidal heating
 	Options:
 		tidalheat -- binary; turns on/off viscosity-dependent tidal heating from Mitri & Showman (2005), default = 0
 		Ttol -- convergence tolerance for temperature, default = 0.1 K
 		phitol -- convergence tolerance for liquid fraction, default = 0.01
-		latentheat -- 1 : use Huber et al. (2008) enthalpy method
-					  2 : use method to modify heat capcity, e.g. Michaut and Manga, 2014 or Hesse et al., 2018
-					    => must choose a solidus and liquidus temperature if using
+		latentheat -- 1 : use Huber et al. (2008) enthalpy method (other options coming soon?)
 		freezestop -- binary; stop when sill is frozen, default = 0
+
 	Usage:
 		Assuming, model = IceSystem(...)
 		- Turn on tidal heating component
@@ -30,9 +29,9 @@ class HeatSolver:
 			model.Ttol = 0.001
 			model.phitol = 0.0001
 			model.Stol = 0.0001
-	'''
+	"""
 	# off and on options
-	tidalheat = 0  # turns off or on tidalheating component
+	tidalheat = 0  # off/on tidalheating component
 	Ttol = 0.1  # temperature tolerance
 	phitol = 0.01  # liquid fraction tolerance
 	Stol = 1  # salinity tolerance
@@ -40,34 +39,48 @@ class HeatSolver:
 	freezestop = 0  # stop simulation upon total solidification of sill
 
 	class outputs:
+		"""Class structure to help define and calculate desired outputs of a simulation."""
+
 		def choose(self, all=False, T=False, phi=False, k=False, S=False, Q=False, h=False, r=False,
-		           freeze_fronts=False, percent_frozen=False, iterations=False, output_frequency=1000, output_list=[]):
-			'''
+		           freeze_fronts=False, percent_frozen=False, output_frequency=1000, output_list=[]):
+			"""
 			Choose which outputs to track with time. Each variable is updated at the chosen output frequency and is
 			returned in the dictionary object outputs.transient_results.
 			Parameters:
 				output_frequency : integer
 					the frequency to report a transient result. Default is every 1000 time steps
-				list : list
-					list of strings for the outputs below
-				all : binary
+				output_list : list
+					list of strings for the outputs below. Generally used for simulation that had stopped (i.e. hit a
+					wall time) without desired
+				all : bool
 					turns on all outputs listed below
-				T, phi, k, S, Q : binary
+				T, phi, k, S, Q : bool
 					tracks and returns a list of temperature, liquid fraction, volume averaged thermal conductivity,
 					salinity, and source/sink grids, respectively
-				h : binary
+				h : bool
 					tracks the height of the liquid chamber over time into a 1d list
-				Ra : binary
+				r : bool
+					tracks the radius of the liquid portion over time into a 1d list
+				Ra : bool
 					tracks the rayleigh number across the remaining liquid into a 1d list
-				freeze_fronts : binary
+				freeze_fronts : bool
 					tracks the propagating freeze front at the top and bottom of the sill into a 1d list
-				percent_frozen : binary
+				percent_frozen : bool
 					tracks and returns a 1d list of the percent of the original sill that is now ice
-				iterations : binary
+				iterations : bool
 					tracks and returns a 1d list of 'iter_k' values from the enthalpy method over time
-			'''
+
+			Usage:
+				Output all options every 50 years
+					model.outputs.choose(model, all=True, output_frequency=int(50 * model.constants.styr/model.dt))
+
+				Output only temperature grids and salinity at every time step
+					model.outputs.choose(model, T=True, S=True, output_frequency=1)
+					--or--
+					model.outputs.choose(model, output_list=['T','S'], output_frequency=1);
+			"""
 			to_output = {'T': T, 'phi': phi, 'k': k, 'S': S, 'Q': Q, 'h': h, 'freeze fronts': freeze_fronts, 'r': r,
-			             'percent frozen': percent_frozen, 'iterations': iterations}
+			             'percent frozen': percent_frozen}
 			if all: to_output = {key: True for key, value in to_output.items()}
 			if len(output_list) != 0:
 				for item in output_list: to_output[item] = True
@@ -82,16 +95,16 @@ class HeatSolver:
 			self.outputs.outputs = self.outputs.transient_results.copy()
 
 		def calculate_outputs(self, n):
-			'''
-			--- THIS COULD PROBABLY BE WRITTEN MORE PYTHONIC
-			Calculates the output and appends it to the list for chosen outputs
+			"""
+			Calculates the output and appends it to the list for chosen outputs. See outputs.choose() for description
+			of values calculated here.
 			Parameters:
 				n : integer
 					nth time step during simulation
 			Returns:
 				ans : dictionary object
 					dictionary object with chosen outputs as 1d lists
-			'''
+			"""
 			ans = {}
 			for key in self.outputs.outputs:
 				if key == 'time':
@@ -110,8 +123,6 @@ class HeatSolver:
 					tmp = np.where(self.phi > 0)
 					ans[key] = np.array([min(tmp[0]), max(tmp[0])]) * self.dz
 					del tmp
-				if key == 'iterations':
-					ans[key] = self.num_iter
 				if key == 'T':
 					ans[key] = self.T.copy()
 				if key == 'S':
@@ -125,32 +136,39 @@ class HeatSolver:
 			return ans
 
 		def get_results(self, n):
+			"""Calls outputs.calculate_outputs() then saves dictionary of results to file"""
 			if n % self.outputs.output_frequency == 0:
 				get = self.outputs.calculate_outputs(self, n)
 				save_data(get, self.outputs.tmp_data_file_name + '_n={}'.format(n), self.outputs.tmp_data_directory)
 
-		def get_all_data(self):
-			cwd = os.getcwd()
-			os.chdir(self.outputs.tmp_data_directory)
+		def get_all_data(self, del_files=True):
+			"""Concatenates all saved outputs from outputs.get_results() and puts into a single dictionary object."""
+			cwd = os.getcwd()  # find working directory
+			os.chdir(self.outputs.tmp_data_directory)  # change to directory where data is being stored
+			# make a list of all results files in directory
 			data_list = nat_sort([data for data in os.listdir() if data.endswith('.pkl') and \
 			                      self.outputs.tmp_data_file_name in data])
+			# copy dictionary of desired results
 			ans = self.outputs.transient_results.copy()
+			# iterate over file list
 			for file in data_list:
-				tmp_dict = load_data(file)
-				for key in self.outputs.outputs:
-					ans[key].append(tmp_dict[key])
+				tmp_dict = load_data(file)  # load file
+				for key in self.outputs.outputs:  # iterate over desired outputs
+					ans[key].append(tmp_dict[key])  # add output from result n to final file
 				del tmp_dict
-				os.remove(file)
+				if del_files: os.remove(file)
 
+			# make everything a numpy array for easier manipulation
 			for key in self.outputs.outputs:
 				ans[key] = np.asarray(ans[key])
 
+			# go back to working directory
 			os.chdir(cwd)
 			return ans
 
 	def set_boundaryconditions(self, top=True, bottom=True, sides=True):
-		'''
-			Set boundary conditions for heat solver
+		"""
+			Set boundary conditions for heat solver.
 			top : top boundary conditions
 				default: Dirichlet, Ttop = Tsurf chosen earlier
 				'Flux': surface loses heat to a "ghost cell" of ice equal to Tsurf
@@ -161,19 +179,25 @@ class HeatSolver:
 					* NOTE: must set up domain such that anomaly is far enough away to not interact with the
 					edges of domain
 				'Reflect' : a 'no flux' boundary condition
-		'''
+		"""
+
 		self.topBC = top
 		self.botBC = bottom
 		self.sidesBC = sides
 
 	def update_salinity(self, phi_last):
+		"""
+		Parameterization of salt advection and diffusion in the intrusion. See Chivers et al., 201X for full
+		description of parameterization.
+		"""
+
 		if self.issalt:
-			new_ice = np.where((phi_last > 0) & (self.phi == 0))
-			water = np.where(self.phi >= self.rejection_cutoff)
-			vol = np.shape(water)[1]
-			rejected_salt = 0
-			self.removed_salt.append(0)
-			if len(new_ice[0]) > 0 and vol != 0:
+			new_ice = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
+			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
+			vol = np.shape(water)[1]  # calculate volume of water
+			rejected_salt = 0  # initialize amount of salt rejected, ppt
+			self.removed_salt.append(0)  # start catalogue of salt removed from system
+			if len(new_ice[0]) > 0 and vol != 0:  # iterate over cells where ice has just formed
 				for i in range(len(new_ice[0])):
 					# save starting salinity in cell
 					S_old = self.S[new_ice[0][i], new_ice[1][i]]
@@ -183,16 +207,19 @@ class HeatSolver:
 					dTz = (self.T[new_ice[0][i] - 1, new_ice[1][i]] - self.T[new_ice[0][i] + 1, new_ice[1][i]]) / (
 							2 * self.dz)
 					# brine drainage parameterization:
-					#  bottom of sill -> no gravity-drainage, salt stays
+					#  bottom of intrusion -> no gravity-drainage, salt stays
 					if dTz > 0:
 						self.S[new_ice[0][i], new_ice[1][i]] = S_old
 
-					#  top of sill -> brine drains and rejects salt
+					#  top of intrusion -> brine drains and rejects salt
 					elif dTz < 0:
 						# dT = np.hypot(dTx, dTz)  # gradient across the diagonal of the cell
 						# dT = max(abs(dTx), abs(dTz))  # maximum value
 						dT = (abs(dTx) + abs(dTz)) / 2  # average over both
+						# salt entrained in newly formed ice determined by Buffo et al., 2019 results. (See
+						# IceSystem.entrain_salt() function)
 						self.S[new_ice[0][i], new_ice[1][i]] = self.entrain_salt(dT, S_old)
+						# not all salt will be entrained in ice, some will be mixed back into
 						rejected_salt += S_old - self.S[new_ice[0][i], new_ice[1][i]]
 
 				# assume the salt is well mixed into remaining liquid solution in time step dt
@@ -216,11 +243,13 @@ class HeatSolver:
 				return 0
 
 	def update_liquid_fraction(self, phi_last):
+		"""Application of Huber et al., 2008 enthalpy method. Determines volume fraction of liquid/solid in a cell."""
+
 		if self.issalt == True:
-			self.Tm = self.Tm_func(self.S)
+			self.Tm = self.Tm_func(self.S)  # update melting temperature for enthalpy if salt is included in simulation
 		# calculate new enthalpy of solid ice
-		Hs = self.cp_i * self.Tm
-		H = self.cp_i * self.T + self.constants.Lf * phi_last
+		Hs = self.cp_i * self.Tm  # update entalpy of solid ice
+		H = self.cp_i * self.T + self.constants.Lf * phi_last  # calculate the enthalpy in each cell
 		# update liquid fraction
 		self.phi[H >= Hs] = (H[H >= Hs] - Hs[H >= Hs]) / self.constants.Lf
 		self.phi[H <= Hs + self.constants.Lf] = (H[H <= Hs + self.constants.Lf] - Hs[
@@ -231,6 +260,8 @@ class HeatSolver:
 		self.phi[H > Hs + self.constants.Lf] = 1
 
 	def update_volume_averages(self):
+		"""Updates volume averaged thermal properties."""
+
 		if self.kT == True:
 			self.k = (1 - self.phi) * (self.constants.ac / self.T) + self.phi * self.constants.kw
 		else:
@@ -242,13 +273,14 @@ class HeatSolver:
 			self.cp_i = self.constants.cp_i
 
 		if self.issalt:
-			self.rhoc = (1 - self.phi) * (self.constants.rho_i + self.Ci_rho * self.S) * self.cp_i + self.phi * (
-					self.constants.rho_w + self.C_rho * self.S) * self.constants.cp_w
+			self.rhoc = (1 - self.phi) * (self.constants.rho_i + self.Ci_rho * self.S) * self.cp_i + \
+			            self.phi * (self.constants.rho_w + self.C_rho * self.S) * self.constants.cp_w
 		elif not self.issalt:
-			self.rhoc = (
-						            1 - self.phi) * self.constants.rho_i * self.cp_i + self.phi * self.constants.rho_w * self.constants.cp_w
+			self.rhoc = (1 - self.phi) * self.constants.rho_i * self.cp_i + \
+			            self.phi * self.constants.rho_w * self.constants.cp_w
 
 	def update_sources_sinks(self, phi_last, T_last):
+		"""Updates external heat or heat-sinks during simulation."""
 		self.latent_heat = self.constants.rho_i * self.constants.Lf * \
 		                   (self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1]) / self.dt
 
@@ -267,6 +299,7 @@ class HeatSolver:
 		self.Q = self.tidal_heat - self.latent_heat
 
 	def apply_boundary_conditions(self, T):
+		"""Applies chosen boundary conditions during simulation run."""
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
 			self.T[-1, 1:-1] = self.Tbot
@@ -299,6 +332,8 @@ class HeatSolver:
 			self.T[:, -1] = self.T[:, -2].copy()
 
 	def print_all_options(self, nt):
+		"""Prints options chosen for simulation."""
+
 		def stringIO(bin):
 			if bin:
 				return 'on'
@@ -351,9 +386,27 @@ class HeatSolver:
 			print('no outputs requested')
 
 	def solve_heat(self, nt, dt, print_opts=True, n0=0):
+		"""
+		Iteratively solve heat two-dimension heat diffusion problem with temperature-dependent conductivity of ice.
+		Parameters:
+			nt : int
+				number of time steps to take
+			dt : float
+				time step, s
+			print_opts: bool
+				whether to call print_opts() function above
+			n0 : float
+				use if not starting simulation from nt=0, generally used for restarting a simulation (see
+				restart_simulation.py)
+
+		Usage:
+			Run simulation for 1000 time steps with dt = 300 s
+				model.solve_heat(nt=1000, dt=300)
+		"""
 		self.dt = dt
 		self.model_time = dt
 		start_time = _timer_.clock()
+		self.num_iter = []
 		if print_opts: self.print_all_options(nt)
 
 		for n in range(n0, n0 + nt):
@@ -385,36 +438,67 @@ class HeatSolver:
 				phiErr = (abs(self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1])).max()
 
 				iter_k += 1
+
 				# kill statement when parameters won't allow solution to converge
 				if iter_k > 1000:
 					raise Exception('solution not converging')
 
 			# outputs here
-			self.num_iter = iter_k
+			self.num_iter.append(iter_k)
 			self.model_time = n * self.dt
 
-			try:
+			try:  # save outputs
 				self.outputs.get_results(self, n=n)
 				save_data(self, 'model_runID' + self.outputs.tmp_data_file_name.split('runID')[1] + '.pkl',
 				          self.outputs.tmp_data_directory, final=0)
-			except AttributeError:
+			except AttributeError:  # no outputs chosen
 				pass
 
-			if self.freezestop:
-				if (len(self.phi[self.phi > 0]) == 0):  # or (self.issalt and self.saturated):
+			if self.freezestop:  # stop if no liquid remains
+				if (len(self.phi[self.phi > 0]) == 0):
 					print('sill frozen at {0:0.04f}s'.format(self.model_time))
 					self.run_time = _timer_.clock() - start_time
 					return self.model_time
 
 			del T_last, phi_last, Cx, Cz, Tx, Tz, iter_k, TErr, phiErr
+
 		self.run_time = _timer_.clock() - start_time
 
 	class stefan:
-		'''
-		Solutions to analytical two-phase heat diffusion problem for comparison
-		'''
+		"""
+		Analytical two-phase heat diffusion problem for comparison with model results.
+		(See https://en.wikipedia.org/wiki/Stefan_problem)
+		"""
 
 		def solution(self, t, T1, T0):
+			"""
+			Solution to the Stefan Problem
+			Parameters:
+				t : float
+					time, s
+				T1, T0 : float
+					temperatures of solid or liquid, K
+			'Returns':
+				stefan.zm : float
+					melting/freezing front position at time t
+				stefan.zm_func : function object
+					melting/freezing front position as a function of time
+						Usage: t = array(0, 1e6)  # s; zm = stefan.zm_func(t)
+				stefan.zm_const : float
+					constant for the melting/freezing front position,i.e. 2 * lam * sqrt(kappa)
+				stefan.z : array
+					array of position values from 0 to the melting/freezing front problem (0 < z < zm), for use with
+					stefan.T
+				stefan.T : array
+					temperature profile at time t along position z
+
+			Usage:
+				Melting problem
+					model.stefan.solution(1e6, 400., 273.15)
+
+				Freezing problem
+					model.stefan.solution(1e6, 273.15, 100.)
+			"""
 			if T1 > T0:  # melting regime
 				kappa = self.constants.kw / (self.constants.cp_w * self.constants.rho_w)
 				Stf = self.constants.cp_w * (T1 - T0) / self.constants.Lf
@@ -431,7 +515,20 @@ class HeatSolver:
 			self.stefan.z = np.linspace(0, self.stefan.zm)
 			self.stefan.T = T1 - (T1 - T0) * erf(self.stefan.z / (2 * np.sqrt(kappa * t))) / erf(lam)
 
-		def compare(self, dt, stop=0.9, output_frequency=100):
+		def compare(self, dt, stop=0.9, output_frequency=1000):
+			"""
+			Runs a simulation of the Stefan problem to ensure discretization is correct
+			Parameters:
+				dt : float
+					time step, s
+				stop : float
+					percent of domain that is melted/frozen at which to stop the simulation
+				output_frequency: int
+					the frequency to report a transient result.
+
+			Usage:
+				model.stefan.compare(0.1, stop=0.5)
+			"""
 			if self.constants.ki != self.constants.kw:
 				print('--correcting thermal properties to be the same')
 				self.constants.rho_w = self.constants.rho_i

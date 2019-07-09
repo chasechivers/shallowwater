@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/3/19
+# Last updated: 7/8/19
 # Modular build for 2d heat diffusion problem
 #   applied to liquid water in the ice shell of Europa
 
@@ -30,7 +30,7 @@ class IceSystem(HeatSolver):
 			Lx : float
 				length of horizontal spatial domain, m
 			Lz : float
-				"depth of shell", length of vertical spatial domain, m
+				thickness of shell, length of vertical spatial domain, m
 			dx : float
 				horizontal spatial step size, m
 			dz : float
@@ -49,18 +49,20 @@ class IceSystem(HeatSolver):
 		Usage:
 			Ice Shell is 40 km thick and 40 km wide at a spatial discretization of 50 m.
 				model = IceSystem(40e3, 40e3, 50, 50)
+
+			See README
 		"""
 
 		self.Lx, self.Lz = Lx, Lz
 		self.dx, self.dz = dx, dz
 		self.nx, self.nz = int(Lx / dx + 1), int(Lz / dz + 1)
-		self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero
+		self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
 		if use_X_symmetry:
 			self.symmetric = True
 			self.Lx = self.Lx / 2
 			self.nx = int(self.Lx / self.dx + 1)
 			self.X = np.linspace(0, self.Lx, self.nx)
-			self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero
+			self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
 			self.X, self.Z = np.meshgrid(self.X, self.Z)  # create spatial grid
 		elif use_X_symmetry is False:
 			self.X = np.linspace(-self.Lx / 2, self.Lx / 2, self.nx)  # x domain centered on 0
@@ -210,12 +212,12 @@ class IceSystem(HeatSolver):
 				center = thickness / 2 + depth
 				try:
 					if self.symmetric:  # adjust geometry to make sure the center of the intrusion isn't on the boundary
-						_R_ = self.X + self.dx
-						center -= self.dz  # this ensures the top-most edge of the intrusion is at the right depth
+						_R_ = self.X - self.dx
+						thickness += self.dz
 				except AttributeError:
 					_R_ = self.X
 				self.geom = np.where((_R_ / radius) ** 2 + (self.Z - center) ** 2 / ((thickness / 2) ** 2) <= 1)
-				del center
+				del center, _R_
 			elif geometry == 'box':
 				try:
 					if self.symmetric:  # adjust geometry to make sure the center of the intrusion isn't on the boundary
@@ -318,6 +320,8 @@ class IceSystem(HeatSolver):
 
 		# composition and concentration coefficients for fits from Buffo et al. (2019)
 		# others have been calculated by additional runs using the model from Buffo et al. (2019)
+
+		# dict structure {composition: {concentration: [a,b,c,d]}}
 		self.shallow_consts = {'MgSO4': {0: [0., 0., 0., 0.],
 		                                 12.3: [12.21, -8.3, 1.836, 20.2],
 		                                 100: [22.19, -11.98, 1.942, 21.91],
@@ -328,12 +332,14 @@ class IceSystem(HeatSolver):
 		                                100: [0., 0., 0., 0.],
 		                                260: [0., 0., 0., 0.]}
 		                       }
+
+		# dict structure {composition: {concentration: [a,b]}}
 		self.linear_consts = {'MgSO4': {0: [0., 0.],
 		                                12.3: [1.0375, 0.40205],
 		                                100: [5.4145, 0.69992],
 		                                282: [14.737, 0.62319]},
 		                      'NaCl': {0: [0., 0.],
-		                               10: [0., 0.],
+		                               10: [1.4439, 0.1704],
 		                               34: [1.9231, 0.33668],
 		                               100: [0., 0.],
 		                               260: [0., 0.]}
