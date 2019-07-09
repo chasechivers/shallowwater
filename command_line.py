@@ -7,6 +7,7 @@ def main(argv):
 	import os
 	cwd = os.getcwd()
 	dir = '/tmp/'
+	# directory i use on the GATech PACE cluster
 	outputdirectory = '/nv/hp5/cchivers3/scratch/'
 	Lz = 5e3
 	Lx = 6e3
@@ -31,7 +32,7 @@ def main(argv):
 		                            'rejection-cutoff=', 'names=', 'in-situ-melt=', 'cpT=', 'geometry=',
 		                            'Ttol=', 'phitol=', 'Stol=', 'x-symm=', 'T-match='])
 	except getopt.GetoptError:
-		print('pace_easy_testing.py  -> options (see modular_build.py documentation (or the above) for '
+		print('command_line.py  -> options (see IceSystem.py documentation (or the above) for '
 		      'defaults/options)\n'
 		      'Computational Properties, \n'
 		      '  --Lz, --Lx \t : depth and width sizes, m (float)\n'
@@ -65,7 +66,7 @@ def main(argv):
 	print(opts, args)
 	for opt, arg in opts:
 		if opt == '-h':
-			print('pace_easy_testing.py  -> options (see modular_build.py documentation (or the above) for '
+			print('command_line.py  -> options (see IceSystem.py documentation (or the above) for '
 			      'defaults/options)\n'
 			      'Computational Properties, \n'
 			      '  --Lz, --Lx \t : depth and width sizes, m (float)\n'
@@ -176,5 +177,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-	print('starting')
 	main(sys.argv[1:])
