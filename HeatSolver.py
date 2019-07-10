@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/8/19
+# Last updated: 7/10/19
 
 import numpy as np
 import time as _timer_
@@ -18,7 +18,7 @@ class HeatSolver:
 		Ttol -- convergence tolerance for temperature, default = 0.1 K
 		phitol -- convergence tolerance for liquid fraction, default = 0.01
 		latentheat -- 1 : use Huber et al. (2008) enthalpy method (other options coming soon?)
-		freezestop -- binary; stop when sill is frozen, default = 0
+		freezestop -- binary; stop when intrusion is frozen, default = 0
 
 	Usage:
 		Assuming, model = IceSystem(...)
@@ -36,7 +36,7 @@ class HeatSolver:
 	phitol = 0.01  # liquid fraction tolerance
 	Stol = 1  # salinity tolerance
 	latentheat = 1  # choose enthalpy method to use
-	freezestop = 0  # stop simulation upon total solidification of sill
+	freezestop = 0  # stop simulation upon total solidification of intrusion
 
 	class outputs:
 		"""Class structure to help define and calculate desired outputs of a simulation."""
@@ -61,15 +61,10 @@ class HeatSolver:
 					tracks the height of the liquid chamber over time into a 1d list
 				r : bool
 					tracks the radius of the liquid portion over time into a 1d list
-				Ra : bool
-					tracks the rayleigh number across the remaining liquid into a 1d list
 				freeze_fronts : bool
-					tracks the propagating freeze front at the top and bottom of the sill into a 1d list
+					tracks the propagating freeze front at the top and bottom of the intrusion into a 1d list
 				percent_frozen : bool
-					tracks and returns a 1d list of the percent of the original sill that is now ice
-				iterations : bool
-					tracks and returns a 1d list of 'iter_k' values from the enthalpy method over time
-
+					tracks and returns a 1d list of the percent of the original intrusion that is now ice
 			Usage:
 				Output all options every 50 years
 					model.outputs.choose(model, all=True, output_frequency=int(50 * model.constants.styr/model.dt))
@@ -194,7 +189,7 @@ class HeatSolver:
 		if self.issalt:
 			new_ice = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
 			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
-			vol = np.shape(water)[1]  # calculate volume of water
+			vol = np.shape(water)[1]  # calculate "volume" of water
 			rejected_salt = 0  # initialize amount of salt rejected, ppt
 			self.removed_salt.append(0)  # start catalogue of salt removed from system
 			if len(new_ice[0]) > 0 and vol != 0:  # iterate over cells where ice has just formed
@@ -456,7 +451,7 @@ class HeatSolver:
 
 			if self.freezestop:  # stop if no liquid remains
 				if (len(self.phi[self.phi > 0]) == 0):
-					print('sill frozen at {0:0.04f}s'.format(self.model_time))
+					print('instrusion frozen at {0:0.04f}s'.format(self.model_time))
 					self.run_time = _timer_.clock() - start_time
 					return self.model_time
 

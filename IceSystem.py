@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/8/19
+# Last updated: 7/10/19
 # Modular build for 2d heat diffusion problem
 #   applied to liquid water in the ice shell of Europa
 
@@ -43,7 +43,7 @@ class IceSystem(HeatSolver):
 			    choose whether to use temperature-dependent thermal conductivity,
 			    default = True, temperature-dependent, k=ac/T (Petrenko, Klinger, etc.)
 			use_X_symmetry : binary
-				assume the system is symmetric about the center of the sill
+				assume the system is symmetric about the center of the intrusion
 				* NOTE: Must use Reflecting boundary condition for sides if using this
 
 		Usage:
@@ -253,8 +253,8 @@ class IceSystem(HeatSolver):
 			radius : float
 				set radius of intrusion, m
 			phi : float [0,1]
-				set liquid fraction of sill, generally interested in totally liquid bodies so default = 1
-			geometry : string (see set_sill_geom()), array
+				set liquid fraction of intrusion, generally interested in totally liquid bodies so default = 1
+			geometry : string (see set_intrusion_geom()), array
 				set geometry of intrusion, default is an ellipse
 
 		Usage:
@@ -267,7 +267,7 @@ class IceSystem(HeatSolver):
 			raise Exception('liquid fraction must be between 0 and 1')
 
 		# save intrusion properties
-		self.Tsill = T
+		self.T_int = T
 		self.depth, self.thickness, self.R_int = depth, thickness, radius
 		self.set_intrusion_geom(depth, thickness, radius, geometry)  # get chosen geometry
 		self.T[self.geom] = T  # set intrusion temperature to chosen temperature
@@ -286,8 +286,8 @@ class IceSystem(HeatSolver):
 				Choose which composition the liquid should be.
 				Options: 'MgSO4', 'NaCl'
 			concentration : float
-				Initial sill concentration and/or ocean concentration; if using the shell option (below), this assumes
-				that the shell was frozen out of an ocean with this concentration and composition
+				Initial intrusion concentration and/or ocean concentration; if using the shell option (below),
+				this assumes that the shell was frozen out of an ocean with this concentration and composition
 			rejection_cutoff : float > 0
 				Liquid fraction (phi) below which no more salt will be accepted into the remaining liquid or
 				interstitial liquid. Note: should be greater than 0
@@ -344,6 +344,8 @@ class IceSystem(HeatSolver):
 		                               100: [0., 0.],
 		                               260: [0., 0.]}
 		                      }
+
+		# dict structure {composition: {concentration: [a,b,c]}}
 		self.depth_consts = {'MgSO4': {12.3: [1.0271, -74.0332, -4.2241],
 		                               100: [5.38, -135.096, -8.2515],
 		                               282: [14.681, -117.429, -5.4962]},
@@ -364,7 +366,7 @@ class IceSystem(HeatSolver):
 
 		if self.composition == 'MgSO4':
 			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for MgSO4
-			self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + self.constants.Tm
+			self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + 273.055175687
 			# density changes for water w/ concentration of salt below
 			self.C_rho = 1.145
 			self.Ci_rho = 7.02441855e-01
@@ -376,7 +378,7 @@ class IceSystem(HeatSolver):
 
 		elif self.composition == 'NaCl':
 			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for NaCl
-			self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + self.constants.Tm
+			self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + 272.63617665
 			# linear fit for density change due to salinity S
 			self.C_rho = 0.8644
 			self.Ci_rho = 6.94487270e-01
@@ -399,13 +401,13 @@ class IceSystem(HeatSolver):
 			if in_situ is False:  # for water emplaced in a salty shell
 				self.S += self.phi * concentration
 			else:  # must redistribute the salt evenly to simulate real in-situ melting
-				print('Redistributing salt in sill')
+				print('Redistributing salt in intrusion')
 				try:
 					S_int_tot = self.S[self.geom].sum()
 					self.S[self.geom] = S_int_tot / np.shape(self.geom)[1]
-					if self.S[self.geom].sum() / S_int_tot > 1.0 + 1e-15 or self.S[
-						self.geom].sum() / S_int_tot < 1.0 - 1e-15:
-						print('Ssillnew/Si =', self.S[self.geom].sum() / S_int_tot)
+					if self.S[self.geom].sum() / S_int_tot > 1.0 + 1e-15 or \
+							self.S[self.geom].sum() / S_int_tot < 1.0 - 1e-15:
+						print('S_int_new/Si =', self.S[self.geom].sum() / S_int_tot)
 						raise Exception('problem with salt redistribution')
 				except AttributeError:
 					pass
@@ -434,9 +436,9 @@ class IceSystem(HeatSolver):
 		self.removed_salt = [0]
 		# update temperature of liquid to reflect salinity
 		try:
-			self.Tsill = self.Tm_func(self.S[self.geom])[0]
-			print('--Updating intrusion temperature to reflect initial salinity, Tsill =', self.Tsill)
-			self.T[self.geom] = self.Tsill
+			self.T_int = self.Tm_func(self.S[self.geom])[0]
+			print('--Updating intrusion temperature to reflect initial salinity, Tint =', self.T_int)
+			self.T[self.geom] = self.T_int
 		except AttributeError:
 			pass
 		self.save_initials()
