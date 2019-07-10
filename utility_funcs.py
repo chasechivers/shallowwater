@@ -13,7 +13,7 @@ def file_namer(model, outputdir, *argv):
 	#  variables chosen to be model.__ can be changed to be included in file name if so desired
 	defaults = {'Lz': 5e3, 'Lx': 5e3, 'dx': 10, 'dz': 10, 'dt': 3.14e7 / (24 * 4), 'kT': True, 'cpT': True,
 	            'issalt': False, 'Tsurf': 0., 'Tbot': 0, 'topBC': True, 'botBC': True, 'sidesBC': True,
-	            'tidalheat': False, 'nx': model.nx, 'nz': model.nz, 'Tsill': 273.15, 'depth': 0, 'R_int': 0,
+	            'tidalheat': False, 'nx': model.nx, 'nz': model.nz, 'T_int': 273.15, 'depth': 0, 'R_int': 0,
 	            'thickness': 0, 'freezestop': model.freezestop, 'num_iter': model.num_iter,
 	            'model_time': model.model_time, 'run_time': model.run_time, 'Ttol': 0.1, 'phitol': 0.01,
 	            'symmetric': 0, 'Stol': 1, 'cp_i': model.cp_i, 'tidal_heat': model.tidal_heat}

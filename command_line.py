@@ -32,7 +32,7 @@ def main(argv):
 		                            'rejection-cutoff=', 'names=', 'in-situ-melt=', 'cpT=', 'geometry=',
 		                            'Ttol=', 'phitol=', 'Stol=', 'x-symm=', 'T-match='])
 	except getopt.GetoptError:
-		print('command_line.py  -> options (see IceSystem.py documentation (or the above) for '
+		print('command_line.py  -> options (see IceSystem/HeatSolver documentation (or the above) for '
 		      'defaults/options)\n'
 		      'Computational Properties, \n'
 		      '  --Lz, --Lx \t : depth and width sizes, m (float)\n'
@@ -66,7 +66,7 @@ def main(argv):
 	print(opts, args)
 	for opt, arg in opts:
 		if opt == '-h':
-			print('command_line.py  -> options (see IceSystem.py documentation (or the above) for '
+			print('command_line.py  -> options (see IceSystem/HeatSolver documentation (or the above) for '
 			      'defaults/options)\n'
 			      'Computational Properties, \n'
 			      '  --Lz, --Lx \t : depth and width sizes, m (float)\n'
