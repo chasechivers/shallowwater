@@ -74,19 +74,18 @@ match the melting temperature for a given concentration and composition. It will
 --Pure shell; adjusting temperature profile: Tsurf = 50.0, Tbot = 271.703382899752
 init_T(Tsurf = 50.0, Tbot = 271.703382899752
 	 Temperature profile initialized to non-linear
---Updating intrusion temperature to reflect initial salinity, Tsill = 271.703382899752
+--Updating intrusion temperature to reflect initial salinity, Tint = 271.703382899752
 ```
 
 Visualize initial salinity profile
 ```python
-import matplotlib.pyplot as plt
 plt.pcolormesh(model.X, model.Y, model.S)
 plt.colorbar('ppt NaCl')
 plt.gca().invert_yaxis()
 plt.show()
 ```
 
-Begin simulation until liquid freezes using a 3e5 s time step (`dt`) and track everything every 50 years. Since we 
+Run simulation until liquid freezes using a 3e5 s time step (`dt`) and track everything every 50 years. Since we 
 exploited the system's symmetry, we must use the `sides='Reflect'` boundary condition
 ```python
 dt = 3e5  # s
@@ -109,3 +108,16 @@ plt.gca().invert_yaxis()
 plt.legend()
 plt.show()
 ```
+
+# Package dependencies
+Packages used here are generally in the standard library or in standard usage [SciPy](https://www.scipy.org/), 
+[NumPy](https://www.numpy.org/), and [matplotlib](https://matplotlib.org/) for plotting. 
+
+Outside of these, the 
+[dill](https://pypi.org/project/dill/) package is used in `utility_funcs.py` for saving results. 
+[Cython](https://cython.org/) can be used to speed up simulations. To use Cython, rename `IceSystem.py` and 
+`HeatSolver.py` to `IceSystem.pyx` and `HeatSolver.pyx`, then in terminal enter the command
+```
+$ python cysetup.py build_ext --inplace
+```
+Then any future call to import the `IceSystem` or `HeatSolver` modules will use the C-wrapped version
