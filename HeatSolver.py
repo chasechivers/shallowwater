@@ -242,9 +242,9 @@ class HeatSolver:
 
 	def update_liquid_fraction(self, phi_last):
 		"""Application of Huber et al., 2008 enthalpy method. Determines volume fraction of liquid/solid in a cell."""
-
-		if self.issalt == True:
-			self.Tm = self.Tm_func(self.S)  # update melting temperature for enthalpy if salt is included in simulation
+		# update melting temperature for enthalpy if salt is included in simulation
+		if self.issalt:
+			self.Tm = self.Tm_func(self.S, *self.Tm_consts[self.composition])
 		# calculate new enthalpy of solid ice
 		Hs = self.cp_i * self.Tm  # update entalpy of solid ice
 		H = self.cp_i * self.T + self.constants.Lf * phi_last  # calculate the enthalpy in each cell
@@ -260,12 +260,12 @@ class HeatSolver:
 	def update_volume_averages(self):
 		"""Updates volume averaged thermal properties."""
 
-		if self.kT == True:
+		if self.kT:
 			self.k = (1 - self.phi) * (self.constants.ac / self.T) + self.phi * self.constants.kw
 		else:
 			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
 
-		if self.cpT is True:
+		if self.cpT:
 			self.cp_i = 185. + 2 * 7.037 * self.T
 		else:
 			self.cp_i = self.constants.cp_i
@@ -283,7 +283,7 @@ class HeatSolver:
 		                   (self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1]) / self.dt
 
 		self.tidal_heat = 0
-		if self.tidalheat == True:
+		if self.tidalheat:
 			# ICE effective viscosity follows an Arrenhius law
 			#   viscosity = reference viscosity * exp[C/Tm * (Tm/T - 1)]
 			# if cell is water, just use reference viscosity for pure ice at 0 K
@@ -447,8 +447,9 @@ class HeatSolver:
 
 			try:  # save outputs
 				self.outputs.get_results(self, n=n)
-				save_data(self, 'model_runID' + self.outputs.tmp_data_file_name.split('runID')[1] + '.pkl',
-				          self.outputs.tmp_data_directory, final=0)
+			# this makes the runs incredibly slow and is really not super useful, but here if needed
+			# save_data(self, 'model_runID{}.pkl'.format(self.outputs.tmp_data_file_name.split('runID')[1]),
+			#          self.outputs.tmp_data_directory, final=0)
 			except AttributeError:  # no outputs chosen
 				pass
 
@@ -507,7 +508,11 @@ class HeatSolver:
 			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
 
 			self.stefan.zm = 2 * lam * np.sqrt(kappa * t)
-			self.stefan.zm_func = lambda time: 2 * lam * np.sqrt(kappa * time)
+
+			def zm_func(t):
+				return 2 * lam * np.sqrt(kappa * t)
+
+			self.stefan.zm_func = zm_func
 			self.stefan.zm_const = 2 * lam * np.sqrt(kappa)
 			# self.stefan_time_frozen = (self.thickness / (2 * lam)) ** 2 / kappa
 			self.stefan.z = np.linspace(0, self.stefan.zm)

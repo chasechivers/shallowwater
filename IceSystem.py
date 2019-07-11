@@ -22,7 +22,6 @@ class IceSystem(HeatSolver):
 	equation utilizing an enthalpy method (Huber et al., 2008) to account for latent heat from phase change as well
 	as a parameterization for a saline system.
 	"""
-
 	def __init__(self, Lx, Lz, dx, dz, kT=True, cpT=False, use_X_symmetry=False):
 		"""
 		Initialize the system.
@@ -38,14 +37,16 @@ class IceSystem(HeatSolver):
 			cpT : bool
 			    choose whether to use temperature-depedent specific heat,
 			    default = False.
-			    True: temperature-dependent, cp_i = 185 + 7*T (Hesse et al., 2019)
+			    True: temperature-dependent, cp_i ~ 185 + 7*T (Hesse et al., 2019)
 			kT : bool
 			    choose whether to use temperature-dependent thermal conductivity,
 			    default = True, temperature-dependent, k=ac/T (Petrenko, Klinger, etc.)
-			use_X_symmetry : binary
+			use_X_symmetry : bool
 				assume the system is symmetric about the center of the intrusion
 				* NOTE: Must use Reflecting boundary condition for sides if using this
-
+			issalt : bool
+				declare whether salinity will be used in this system, necessary for declaring fit functions and
+				melting temperature calculations
 		Usage:
 			Ice Shell is 40 km thick and 40 km wide at a spatial discretization of 50 m.
 				model = IceSystem(40e3, 40e3, 50, 50)
@@ -71,7 +72,7 @@ class IceSystem(HeatSolver):
 		self.S = np.zeros((self.nz, self.nx))  # initialize domain with no salt
 		self.phi = np.zeros((self.nz, self.nx))  # initialize domain as ice
 		self.kT, self.cpT = kT, cpT  # k(T), cp_i(T) I/O
-		self.issalt = False  # salt IO
+		self.issalt = False  # salt I/O
 
 	class constants:
 		"""
@@ -274,6 +275,19 @@ class IceSystem(HeatSolver):
 		self.phi[self.geom] = phi  # set intrusion to chosen liquid fraction
 		self.init_volume_averages()  # update volume averages
 
+	# define a bunch of useful functions for salty systems, unused otherwise
+	# non-linear fit, for larger dT
+	def shallow_fit(self, dT, a, b, c, d):
+		return a + b * (dT + c) * (1 - np.exp(-d / dT)) / (1 + dT)
+
+	# linear fit, for small dT
+	def linear_fit(self, dT, a, b):
+		return a + b * dT
+
+	# FREEZCHEM quadratic fit for liquidus curve
+	def Tm_func(self, S, a, b, c):
+		return a * S ** 2 + b * S + c
+
 	def init_salinity(self, S=None, composition='MgSO4', concentration=12.3, rejection_cutoff=0.25, shell=False,
 	                  in_situ=False, T_match=True):
 		"""
@@ -321,6 +335,12 @@ class IceSystem(HeatSolver):
 		# composition and concentration coefficients for fits from Buffo et al. (2019)
 		# others have been calculated by additional runs using the model from Buffo et al. (2019)
 
+		# dic structure {composition: [a,b,c]}
+		# Liquidus curves derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for MgSO4 and NaCl
+		self.Tm_consts = {'MgSO4': [-1.333489497 * 1e-5, -0.01612951864, 273.055175687],
+		                  'NaCl': [-9.1969758 * 1e-5, -0.03942059, 272.63617665]
+		                  }
+
 		# dict structure {composition: {concentration: [a,b,c,d]}}
 		self.shallow_consts = {'MgSO4': {0: [0., 0., 0., 0.],
 		                                 12.3: [12.21, -8.3, 1.836, 20.2],
@@ -358,15 +378,11 @@ class IceSystem(HeatSolver):
 		self.composition = composition
 		self.concentration = concentration
 
-		# non-linear fit, for larger dT
-		self.shallow_fit = lambda dT, a, b, c, d: a + b * (dT + c) * \
-		                                          (1 - np.exp(-d / dT)) / (1 + dT)
-		# linear fit, for small dT
-		self.linear_fit = lambda dT, a, b: a + b * dT
-
 		if self.composition == 'MgSO4':
 			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for MgSO4
-			self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + 273.055175687
+			# changing from lambda notation to def notation for better pickling?
+
+			# def self.Tm_func = lambda S: (-(1.333489497 * 1e-5) * S ** 2) - 0.01612951864 * S + 273.055175687
 			# density changes for water w/ concentration of salt below
 			self.C_rho = 1.145
 			self.Ci_rho = 7.02441855e-01
@@ -374,11 +390,8 @@ class IceSystem(HeatSolver):
 			self.saturation_point = 282.  # ppt, saturation concentration of MgSO4 in water
 			self.constants.rho_s = 2660.  # kg/m^3, density of MgSO4
 
-			self.constants.cp_w = 3985.
-
 		elif self.composition == 'NaCl':
 			# Liquidus curve derived from Liquius 1.0 (Buffo et al. 2019 and FREEZCHEM) for NaCl
-			self.Tm_func = lambda S: (-(9.1969758 * 1e-5) * S ** 2) - 0.03942059 * S + 272.63617665
 			# linear fit for density change due to salinity S
 			self.C_rho = 0.8644
 			self.Ci_rho = 6.94487270e-01
@@ -414,20 +427,21 @@ class IceSystem(HeatSolver):
 
 			# update temperature profile to reflect bottom boundary condition
 			if T_match:
-				self.Tbot = self.Tm_func(s_depth(self.Lz, *self.depth_consts[composition][concentration]))
+				self.Tbot = self.Tm_func(s_depth(self.Lz, *self.depth_consts[composition][concentration]),
+				                         *self.Tm_consts[composition])
 				print('--Adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf, self.Tbot))
 				self.init_T(Tsurf=self.Tsurf, Tbot=self.Tbot)
 		else:
 			# homogenous brine, pure ice shell
 			self.S = self.phi * concentration
 			if T_match:
-				self.Tbot = self.Tm_func(concentration)
+				self.Tbot = self.Tm_func(concentration, *self.Tm_consts[composition])
 				print('--Pure shell; adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf,
 				                                                                                  self.Tbot))
 				self.init_T(Tsurf=self.Tsurf, Tbot=self.Tbot)
 
 		# update initial melting temperature
-		self.Tm = self.Tm_func(self.S)
+		self.Tm = self.Tm_func(self.S, *self.Tm_consts[composition])
 		# update volume average with included salt
 		self.init_volume_averages()
 		# begin tracking mass
@@ -436,7 +450,7 @@ class IceSystem(HeatSolver):
 		self.removed_salt = [0]
 		# update temperature of liquid to reflect salinity
 		try:
-			self.T_int = self.Tm_func(self.S[self.geom])[0]
+			self.T_int = self.Tm_func(self.S[self.geom], *self.Tm_consts[composition])[0]
 			print('--Updating intrusion temperature to reflect initial salinity, Tint =', self.T_int)
 			self.T[self.geom] = self.T_int
 		except AttributeError:
@@ -477,7 +491,7 @@ class IceSystem(HeatSolver):
 					0]
 				if dT > switch_dT:
 					return self.shallow_fit(dT, *self.shallow_consts[composition][S])
-				elif dT < switch_dT:
+				elif dT <= switch_dT:
 					return self.linear_fit(dT, *self.linear_consts[composition][S])
 
 			elif S not in concentrations:

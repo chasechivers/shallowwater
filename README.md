@@ -113,9 +113,12 @@ plt.show()
 Packages used here are generally in the standard library or in standard usage [SciPy](https://www.scipy.org/), 
 [NumPy](https://www.numpy.org/), and [matplotlib](https://matplotlib.org/) for plotting. 
 
-Outside of these, the 
-[dill](https://pypi.org/project/dill/) package is used in `utility_funcs.py` for saving results. 
-[Cython](https://cython.org/) can be used to speed up simulations. To use Cython, rename `IceSystem.py` and 
+Outside of these, the [dill](https://pypi.org/project/dill/) package is used in `utility_funcs.py` for saving results.
+
+## Cython 
+[Cython](https://cython.org/) can be used to <b>drastically</b> speed up simulations and is <b>highly recommended</b>.
+ To use Cython, rename 
+`IceSystem.py` and 
 `HeatSolver.py` to `IceSystem.pyx` and `HeatSolver.pyx`, then in terminal enter the command
 ```
 $ python cysetup.py build_ext --inplace
