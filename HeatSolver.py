@@ -98,7 +98,7 @@ class HeatSolver:
 					nth time step during simulation
 			Returns:
 				ans : dictionary object
-					dictionary object with chosen outputs as 1d lists
+					dictionary object with chosen outputs as 1d numpy arrays
 			"""
 			ans = {}
 			for key in self.outputs.outputs:
@@ -164,12 +164,15 @@ class HeatSolver:
 	def set_boundaryconditions(self, top=True, bottom=True, sides=True):
 		"""
 			Set boundary conditions for heat solver.
-			top : top boundary conditions
-				default: Dirichlet, Ttop = Tsurf chosen earlier
+			top : bool, string
+				top boundary conditions.
+				default: True = Dirichlet, Ttop = Tsurf chosen earlier
 				'Flux': surface loses heat to a "ghost cell" of ice equal to Tsurf
-			bottom: bottom boundary condition
+			bottom: bool
+				bottom boundary condition
 				default: Dirichlet, Tbottom = Tbot chosen earlier
-			sides: left and right boundary conditions, forced symmetric
+			sides: bool, string
+				left and right boundary conditions, forced symmetric
 				default: Dirichlet, Tleft = Tright =  Tedge (see init_T)
 					* NOTE: must set up domain such that anomaly is far enough away to not interact with the
 					edges of domain
@@ -389,7 +392,7 @@ class HeatSolver:
 			dt : float
 				time step, s
 			print_opts: bool
-				whether to call print_opts() function above
+				whether to call print_opts() function above to print all chosen options
 			n0 : float
 				use if not starting simulation from nt=0, generally used for restarting a simulation (see
 				restart_simulation.py)

@@ -163,14 +163,15 @@ class IceSystem(HeatSolver):
 					surface temperature
 				Tbot : float
 					temperature at bottom of domain
-				profile: defaults 'non-linear', 'linear'
+				profile : string
+					-> defaults 'non-linear', 'linear'
 					prescribed temperature profile
 					'non-linear' -- expected equilibrium thermal gradient with k(T)
 					'linear'     -- equilibirium thermal gradient for constant k
 					'stefan'     -- sets up the freezing stefan problem temperature profile
 									in this instance, Tbot should be the melting temperature
 			Returns:
-				T : (nz,nx) array
+				T : (nz,nx) grid
 					grid of temperature values
 		"""
 		# set melting temperature to default
@@ -237,11 +238,10 @@ class IceSystem(HeatSolver):
 
 	def init_intrusion(self, T, depth, thickness, radius, phi=1, geometry='ellipse'):
 		"""
-		Initialize intrusion properties.
+		Initialize intrusion properties. Updates volume averages after initialization: means we can just initialize
+		temperature and intrusion to get all thermal properties set.
 		**So far this only accounts for a single intrusion at the center of the domain
 			should be simple to add multiples in the future if necessary
-		Updates volume averages after initialization: means we can just initialize temperature and intrusion to get
-		all thermal properties set.
 
 		Parameters:
 			T : float
@@ -260,7 +260,7 @@ class IceSystem(HeatSolver):
 		Usage:
 			Intrusion at pure water melting temperature (273.15 K), emplaced at 2 km depth in the shell, 2 km thick
 			and a radius of 4 km:
-			model.init_intrusion(T=273.15, depth=2e3, thickness=2e3, radius=4e3)
+				model.init_intrusion(T=273.15, depth=2e3, thickness=2e3, radius=4e3)
 		"""
 
 		if phi < 0 or phi > 1:
@@ -453,7 +453,7 @@ class IceSystem(HeatSolver):
 			S : float, array
 				salinity (ppt) of newly frozen cell, or array of salinities
 			composition : string
-				salt composition,
+				salt composition
 				options: 'MgSO4', 'NaCl'
 		Returns:
 			amount of salt entrained in ice, ppt
