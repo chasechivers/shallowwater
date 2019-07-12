@@ -163,18 +163,21 @@ def main(argv):
 	model.set_boundaryconditions(sides='Reflect')
 	model.outputs.choose(model, all=True, output_frequency=int(outputfreq * 3.14e7 / dt))
 	model.outputs.tmp_data_directory = cwd + dir
-	model.outputs.tmp_data_file_name += names + str(thickness) + '_' + str(depth)
+	model.outputs.tmp_data_file_name = '{}_{}_{}_{}'.format(model.outputs.tmp_data_file_name, name, thickness, depth)
 	print(model.outputs.tmp_data_file_name)
 	model.tidalheat = 1
 	model.freezestop = 1
 	model.Ttol, model.phitol, model.Stol = Ttol, phitol, Stol
-	print(model.cpT)
-	model.solve_heat(nt=500000000000000000000000, dt=dt)
-	results = model.outputs.get_all_data(model)
-	print('saving data to ', outputdirectory)
-	save_data(model, 'md' + model.outputs.tmp_data_file_name.split('tmp_data_')[1], outputdirectory)
-	save_data(results, 'rs' + model.outputs.tmp_data_file_name.split('tmp_data_')[1], outputdirectory)
 
+	model.solve_heat(nt=5000000000000000000000000, dt=dt)
+	print('  solved in {} s'.format(model.run_time))
+	model.outputs.transient_results = model.outputs.get_all_data(model)
+	print('saving data to ', out_dir)
+	print('   saving model')
+	save_data(model, 'md_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]), out_dir)
+	print('   saving results')
+	save_data(model.outputs.transient_results, 'rs_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]),
+	          out_dir)
 
 if __name__ == '__main__':
 	main(sys.argv[1:])
