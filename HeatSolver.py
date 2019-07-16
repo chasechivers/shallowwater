@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/10/19
+# Last updated: 7/13/19
 
 import numpy as np
 import time as _timer_
@@ -76,18 +76,19 @@ class HeatSolver:
 			"""
 			to_output = {'T': T, 'phi': phi, 'k': k, 'S': S, 'Q': Q, 'h': h, 'freeze fronts': freeze_fronts, 'r': r,
 			             'percent frozen': percent_frozen}
-			if all: to_output = {key: True for key, value in to_output.items()}
+			if all:
+				to_output = {key: True for key, value in to_output.items()}
 			if len(output_list) != 0:
-				for item in output_list: to_output[item] = True
+				to_ouput = {key: True for key in output_list}
+
+			self.outputs.transient_results = {'time': []}
+			self.outputs.transient_results = {key: [] for key in to_output if to_output[key] is True}
+			self.outputs.outputs = self.outputs.transient_results.copy()
 
 			self.outputs.output_frequency = output_frequency
-			self.outputs.transient_results = {'time': []}
 			self.outputs.tmp_data_directory = './tmp/'
 			self.outputs.tmp_data_file_name = 'tmp_data_runID' + ''.join(random.choice(string.digits) for _ in range(4))
-			for key in to_output:
-				if to_output[key] is True:
-					self.outputs.transient_results[key] = []
-			self.outputs.outputs = self.outputs.transient_results.copy()
+
 
 		def calculate_outputs(self, n):
 			"""
@@ -154,8 +155,9 @@ class HeatSolver:
 				if del_files: os.remove(file)
 
 			# make everything a numpy array for easier manipulation
-			for key in self.outputs.outputs:
-				ans[key] = np.asarray(ans[key])
+			# for key in self.outputs.outputs:
+			#	ans[key] = np.asarray(ans[key])
+			ans = {key: np.asarray(value) for key, value in ans.items()}
 
 			# go back to working directory
 			os.chdir(cwd)
@@ -346,6 +348,10 @@ class HeatSolver:
 
 		print('Starting simulation with\n-------------------------')
 		print('\t total model time:  {}s, {}yr'.format(nt * self.dt, (nt * self.dt) / self.constants.styr))
+		print('\t   dt = {} s'.format(self.dt))
+		print('\t Ice shell thickness: {} m'.format(self.Lz))
+		print('\t Lateral domain size: {} m'.format(self.Lx))
+		print('\t    dz = {} m;  dx = {} m'.format(self.dz, self.dx))
 		print('\t surface temperature: {} K'.format(self.Tsurf))
 		print('\t bottom temperature:  {} K'.format(self.Tbot))
 		print('\t boundary conditions:')
@@ -447,9 +453,12 @@ class HeatSolver:
 
 			try:  # save outputs
 				self.outputs.get_results(self, n=n)
-			# this makes the runs incredibly slow and is really not super useful, but here if needed
+
+			# this makes the runs slower and is really not super useful, but here if needed. Note that
+			# the file it saves sometimes cannot be loaded -- not sure why this happens
 			# save_data(self, 'model_runID{}.pkl'.format(self.outputs.tmp_data_file_name.split('runID')[1]),
 			#          self.outputs.tmp_data_directory, final=0)
+
 			except AttributeError:  # no outputs chosen
 				pass
 
@@ -508,10 +517,8 @@ class HeatSolver:
 			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
 
 			self.stefan.zm = 2 * lam * np.sqrt(kappa * t)
-
 			def zm_func(t):
 				return 2 * lam * np.sqrt(kappa * t)
-
 			self.stefan.zm_func = zm_func
 			self.stefan.zm_const = 2 * lam * np.sqrt(kappa)
 			# self.stefan_time_frozen = (self.thickness / (2 * lam)) ** 2 / kappa
