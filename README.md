@@ -77,7 +77,7 @@ init_T(Tsurf = 50.0, Tbot = 271.703382899752
 --Updating intrusion temperature to reflect initial salinity, Tint = 271.703382899752
 ```
 
-Visualize initial salinity profile
+Visualize initial salinity as a heat map
 ```python
 plt.pcolormesh(model.X, model.Y, model.S)
 plt.colorbar('ppt NaCl')
@@ -114,6 +114,11 @@ Packages used here are generally in the standard library or in standard usage [S
 [NumPy](https://www.numpy.org/), and [matplotlib](https://matplotlib.org/) for plotting. 
 
 Outside of these, the [dill](https://pypi.org/project/dill/) package is used in `utility_funcs.py` for saving results.
+
+These can be installed by using pip in your shell through the command
+```
+$ pip install -r requirements.txt
+```
 
 ## Cython 
 [Cython](https://cython.org/) can be used to <b>drastically</b> speed up simulations and is <b>highly recommended</b>.
