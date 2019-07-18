@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/13/19
+# Last updated: 7/10/19
 
 import numpy as np
 import time as _timer_
@@ -74,14 +74,15 @@ class HeatSolver:
 					--or--
 					model.outputs.choose(model, output_list=['T','S'], output_frequency=1);
 			"""
-			to_output = {'T': T, 'phi': phi, 'k': k, 'S': S, 'Q': Q, 'h': h, 'freeze fronts': freeze_fronts, 'r': r,
-			             'percent frozen': percent_frozen}
+			to_output = {'time': True, 'T': T, 'phi': phi, 'k': k, 'S': S, 'Q': Q, 'h': h, 'freeze fronts':
+				freeze_fronts, 'r': r, 'percent frozen': percent_frozen}
 			if all:
 				to_output = {key: True for key, value in to_output.items()}
-			if len(output_list) != 0:
-				to_ouput = {key: True for key in output_list}
 
-			self.outputs.transient_results = {'time': []}
+			if len(output_list) != 0:
+				to_output = {key: True for key in output_list}
+				to_output['time'] = True
+
 			self.outputs.transient_results = {key: [] for key in to_output if to_output[key] is True}
 			self.outputs.outputs = self.outputs.transient_results.copy()
 
@@ -169,16 +170,35 @@ class HeatSolver:
 			top : bool, string
 				top boundary conditions.
 				default: True = Dirichlet, Ttop = Tsurf chosen earlier
-				'Flux': surface loses heat to a "ghost cell" of ice equal to Tsurf
-			bottom: bool
+				'Flux': surface loses heat to a "ghost cell" of ice
+						temperature of ghost cell is based on the equilibrium temperature profile at the depth one
+						spatial size "above" the domain,
+						i.e.: T_(ghost_cell) = Tsurf * (Tbot/Tsurf) ** (-dz/Lz)
+								for Tsurf = 110 K, Tbot = 273.15, & Lz = 5 km => T_(ghost_cell) = 109.8 K
+			bottom: bool, string
 				bottom boundary condition
-				default: Dirichlet, Tbottom = Tbot chosen earlier
+				default, True: Dirichlet, Tbottom = Tbot chosen earlier
+				'Flux' : bottom loses heat to a "ghost cell" of ice at a constant temperature
+						 temperature of ghost cell is based on equilibrium temperature profile at depth one spatial
+						 size below the domain
+						 i.e. T_(ghost_cell) = Tsurf * (Tbot/Tsurf) ** ((Lz+dz)/Lz)
+						    for Tsurf = 110 K, Tbot = 273.15, & Lz = 5 km => T_(ghost_cell) = 273.647 K
+						-> this can be helpful for using a "cheater" vertical domain so as not to have to simulate a
+						whole shell
+				'FluxO': bottom loses heat to a "ghost cell" of water at a constant temperature (i.e. 273.15 K for
+						 pure water).
+						 Temperature will be based on the Tbot chosen earlier, as this assumes the ice shell is
+						 directly on top of a liquid water ocean
+				'FluxC': bottom loses heat to a "ghost cell" of ice at a constant temperature equal to 260 K
+						 temperature is based on most assumed temperature for a convecting ice shell on Europa. This
+						 temperature may be changed by hardcoding it
 			sides: bool, string
 				left and right boundary conditions, forced symmetric
 				default: Dirichlet, Tleft = Tright =  Tedge (see init_T)
 					* NOTE: must set up domain such that anomaly is far enough away to not interact with the
 					edges of domain
 				'Reflect' : a 'no flux' boundary condition
+							-> boundaries are forced to be the same temperature as the adjacent cells in the domain
 		"""
 
 		self.topBC = top
@@ -244,6 +264,7 @@ class HeatSolver:
 
 	def update_liquid_fraction(self, phi_last):
 		"""Application of Huber et al., 2008 enthalpy method. Determines volume fraction of liquid/solid in a cell."""
+
 		# update melting temperature for enthalpy if salt is included in simulation
 		if self.issalt:
 			self.Tm = self.Tm_func(self.S, *self.Tm_consts[self.composition])
@@ -303,6 +324,34 @@ class HeatSolver:
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
 			self.T[-1, 1:-1] = self.Tbot
+
+		elif self.botBC == 'Flux':
+			T_bot_out = self.Tsurf * (self.Tbot / self.Tsurf) ** ((self.Lz + self.dz) / self.Lz)
+			c = self.dt / (2 * self.rhoc[-1, 1:-1])
+
+			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
+			Tbotz = c / self.dz ** 2 * (
+						(self.k[-1, 1:-1] + self.constants.ac / T_bot_out) * (T_bot_out - self.T[-1, 1:-1]) \
+						- (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
+			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
+
+		elif self.botBC == 'FluxO':  # constant temperature ocean
+			c = self.dt / (2 * self.rhoc[-1, 1:-1])
+
+			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
+			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + self.constants.kw) * (self.Tbot - self.T[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
+			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
+
+		elif self.botBC == 'FluxC':  # constant temperature convective layer
+			c = self.dt / (2 * self.rhoc[-1, 1:-1])
+			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
+			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + self.constants.ac / 260.) * (self.Tbot - self.T[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
+			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
 
 		# apply chosen boundary conditions at top of domain
 		if self.topBC == True:
@@ -453,12 +502,9 @@ class HeatSolver:
 
 			try:  # save outputs
 				self.outputs.get_results(self, n=n)
-
-			# this makes the runs slower and is really not super useful, but here if needed. Note that
-			# the file it saves sometimes cannot be loaded -- not sure why this happens
+			# this makes the runs incredibly slow and is really not super useful, but here if needed
 			# save_data(self, 'model_runID{}.pkl'.format(self.outputs.tmp_data_file_name.split('runID')[1]),
 			#          self.outputs.tmp_data_directory, final=0)
-
 			except AttributeError:  # no outputs chosen
 				pass
 

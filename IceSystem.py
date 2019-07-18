@@ -63,7 +63,6 @@ class IceSystem(HeatSolver):
 			self.Lx = self.Lx / 2
 			self.nx = int(self.Lx / self.dx + 1)
 			self.X = np.linspace(0, self.Lx, self.nx)
-			self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
 			self.X, self.Z = np.meshgrid(self.X, self.Z)  # create spatial grid
 		elif use_X_symmetry is False:
 			self.X = np.linspace(-self.Lx / 2, self.Lx / 2, self.nx)  # x domain centered on 0
@@ -117,11 +116,11 @@ class IceSystem(HeatSolver):
 
 	def save_initials(self):
 		""" Save initial values to compare with simulation results. """
-
 		self.T_initial = self.T.copy()
 		self.Tm_initial = self.Tm.copy()
 		self.phi_initial = self.phi.copy()
 		self.S_initial = self.S.copy()
+
 		if self.kT:
 			self.k_initial = self.phi_initial * self.constants.kw + (1 - self.phi_initial) * \
 			                 self.constants.ac / self.T_initial
@@ -133,7 +132,6 @@ class IceSystem(HeatSolver):
 		Initialize volume averaged values over the domain. In practice, this is automatically called by any future
 		function that are changing physical parameters such as liquid fraction, salinity or temperature.
 		"""
-
 		if self.kT:
 			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
 		else:
@@ -156,7 +154,7 @@ class IceSystem(HeatSolver):
 
 		self.save_initials()
 
-	def init_T(self, Tsurf, Tbot, profile='non-linear'):
+	def init_T(self, Tsurf, Tbot, profile='non-linear', real_Lz=0):
 		"""
 		Initialize temperature profile
 			Parameters:
@@ -165,29 +163,58 @@ class IceSystem(HeatSolver):
 				Tbot : float
 					temperature at bottom of domain
 				profile : string
-					-> defaults 'non-linear', 'linear'
+					-> defaults to 'non-linear'
 					prescribed temperature profile
 					'non-linear' -- expected equilibrium thermal gradient with k(T)
 					'linear'     -- equilibirium thermal gradient for constant k
 					'stefan'     -- sets up the freezing stefan problem temperature profile
 									in this instance, Tbot should be the melting temperature
+				real_Lz : float
+					used if you want to simulate some portion of a much larger shell, so this parameter is used to
+					make the temperature profile that of the much larger shell than the one being simulated.
+					For example, a 40 km conductive shell (real_Lz = 40e3) discretized at 10 m can be computationally
+					expensive.However, if we assume that any temperature anomaly at shallow depths (~1-5km) won't
+					reach to 40km within the model time, we can reduce the computational domain to ~5km to speed up
+					the simulation. This will take the Tbot as the Tbot of a 40km and find the temperature at 5km to
+					account for the reduced domain size.
+					Usage case down below
 			Returns:
 				T : (nz,nx) grid
 					grid of temperature values
+
+			Usage :
+				Default usage:
+					model.init_T(Tsurf=75, Tbot=273.15)
+
+				Linear profile:
+					model.init_T(Tsurf = 50, Tbot = 273.15, profile='linear')
+
+				Cheated domain:
+					realLz = 50e3
+					modelLz = 5e3
+					model = IceSystem(Lz=modelLz, ...)
+					model.init_T(Tsurf=110,Tbot=273.15,real_lz=realLz)
 		"""
 		# set melting temperature to default
 		self.Tm = self.constants.Tm * self.T.copy()
 
 		if isinstance(profile, str):
 			if profile == 'non-linear':
+				if real_Lz > 0:
+					Tbot = Tsurf * (Tbot / Tsurf) ** (self.Lz / real_Lz)
 				self.T = Tsurf * (Tbot / Tsurf) ** (abs(self.Z / self.Lz))
+
 			elif profile == 'linear':
+				if real_Lz > 0:
+					Tbot = (Tbot - Tsurf) * (self.Lz / real_Lz) + Tsurf
 				self.T = (Tbot - Tsurf) * abs(self.Z / self.Lz) + Tsurf
+
 			elif profile == 'stefan':
 				self.T[0, :] = Tsurf  # set the very top of grid to surface temperature
 				self.T[1:, :] = Tbot  # everything below is at the melting temperature
 				self.phi[:, :] = 1  # everything starts as liquid
 				profile += ' plus domain all water'
+
 			print('init_T(Tsurf = {}, Tbot = {})'.format(Tsurf, Tbot))
 			print('\t Temperature profile initialized to {}'.format(profile))
 
@@ -348,7 +375,7 @@ class IceSystem(HeatSolver):
 		                                 282: [30.998, -11.5209, 2.0136, 21.1628]},
 		                       'NaCl': {0: [0., 0., 0., 0.],
 		                                10: [7.662, -4.936, 2.106, 24.8],
-		                                34: [10.27, -5.97, 1.977, 22.33],
+		                                34: [11.1, -4.242, 1.91, 22.55],
 		                                100: [0., 0., 0., 0.],
 		                                260: [0., 0., 0., 0.]}
 		                       }
