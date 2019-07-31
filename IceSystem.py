@@ -78,7 +78,7 @@ class IceSystem(HeatSolver):
 		No-methods class used for defining constants in a simulation. May be changed inside here or as an
 		instance during simulation runs.
 		"""
-		styr = 3.14e7  # s/yr, seconds in a year
+		styr = 3.154e7  # s/yr, seconds in a year
 
 		g = 1.32  # m/s2, Europa surface gravity
 

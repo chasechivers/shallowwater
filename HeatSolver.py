@@ -41,6 +41,12 @@ class HeatSolver:
 	class outputs:
 		"""Class structure to help define and calculate desired outputs of a simulation."""
 
+		def __init__(self):
+			self.outputs.tmp_data_directory = ''
+			self.outputs.tmp_data_file_name = ''
+			self.outputs.transient_results = dict()
+			self.outputs.output_frequency = 0
+
 		def choose(self, all=False, T=False, phi=False, k=False, S=False, Q=False, h=False, r=False,
 		           freeze_fronts=False, percent_frozen=False, output_frequency=1000, output_list=[]):
 			"""
@@ -55,14 +61,14 @@ class HeatSolver:
 				all : bool
 					turns on all outputs listed below
 				T, phi, k, S, Q : bool
-					tracks and returns a list of temperature, liquid fraction, volume averaged thermal conductivity,
+					tracks and returns an array of temperature, liquid fraction, volume averaged thermal conductivity,
 					salinity, and source/sink grids, respectively
 				h : bool
-					tracks the height of the liquid chamber over time into a 1d list
+					tracks the height (thickness) of the liquid intrusion over time into a 1d array
 				r : bool
-					tracks the radius of the liquid portion over time into a 1d list
+					tracks the radius of the liquid portion over time into a 1d array
 				freeze_fronts : bool
-					tracks the propagating freeze front at the top and bottom of the intrusion into a 1d list
+					tracks the propagating freeze front at the top and bottom of the intrusion into a 1d array
 				percent_frozen : bool
 					tracks and returns a 1d list of the percent of the original intrusion that is now ice
 			Usage:
@@ -89,7 +95,6 @@ class HeatSolver:
 			self.outputs.output_frequency = output_frequency
 			self.outputs.tmp_data_directory = './tmp/'
 			self.outputs.tmp_data_file_name = 'tmp_data_runID' + ''.join(random.choice(string.digits) for _ in range(4))
-
 
 		def calculate_outputs(self, n):
 			"""
@@ -142,6 +147,7 @@ class HeatSolver:
 			"""Concatenates all saved outputs from outputs.get_results() and puts into a single dictionary object."""
 			cwd = os.getcwd()  # find working directory
 			os.chdir(self.outputs.tmp_data_directory)  # change to directory where data is being stored
+
 			# make a list of all results files in directory
 			data_list = nat_sort([data for data in os.listdir() if data.endswith('.pkl') and \
 			                      self.outputs.tmp_data_file_name in data])
@@ -156,15 +162,13 @@ class HeatSolver:
 				if del_files: os.remove(file)
 
 			# make everything a numpy array for easier manipulation
-			# for key in self.outputs.outputs:
-			#	ans[key] = np.asarray(ans[key])
 			ans = {key: np.asarray(value) for key, value in ans.items()}
 
 			# go back to working directory
 			os.chdir(cwd)
 			return ans
 
-	def set_boundaryconditions(self, top=True, bottom=True, sides=True):
+	def set_boundaryconditions(self, top=True, bottom=True, sides=True, **kwargs):
 		"""
 			Set boundary conditions for heat solver.
 			top : bool, string
@@ -185,25 +189,38 @@ class HeatSolver:
 						    for Tsurf = 110 K, Tbot = 273.15, & Lz = 5 km => T_(ghost_cell) = 273.647 K
 						-> this can be helpful for using a "cheater" vertical domain so as not to have to simulate a
 						whole shell
-				'FluxO': bottom loses heat to a "ghost cell" of water at a constant temperature (i.e. 273.15 K for
-						 pure water).
-						 Temperature will be based on the Tbot chosen earlier, as this assumes the ice shell is
-						 directly on top of a liquid water ocean
-				'FluxC': bottom loses heat to a "ghost cell" of ice at a constant temperature equal to 260 K
-						 temperature is based on most assumed temperature for a convecting ice shell on Europa. This
-						 temperature may be changed by hardcoding it
+				'FluxI', 'FluxW': bottom loses heat to a "ghost cell" of ice ('FluxI') or water ('FluxW') at a chosen
+								constant temperature
+								ex: model.set_boundaryconditions(bottom='FluxI', botT=260);
 			sides: bool, string
-				left and right boundary conditions, forced symmetric
-				default: Dirichlet, Tleft = Tright =  Tedge (see init_T)
-					* NOTE: must set up domain such that anomaly is far enough away to not interact with the
-					edges of domain
-				'Reflect' : a 'no flux' boundary condition
+				Left and right boundary conditions
+				True :  Dirichlet boundary condition;
+						Tleft = Tright =  Tedge (see init_T)
+						* NOTE: must set up domain such that anomaly is far enough away to not interact with the
+						edges of domain
+				'NoFlux : a 'no flux' boundary condition
 							-> boundaries are forced to be the same temperature as the adjacent cells in the domain
+				'RFlux' : 'NoFlux' boundary condition on the left, with a flux boundary at T(z,x=Lx,t) = Tedge(z)
+						that is dL far away. Most useful when using the symmetry about x option.
+						dL value must be chosen when using this option:
+						ex: model.set_boundaryconditions(sides='RFlux', dL=500e3)
 		"""
 
 		self.topBC = top
 		self.botBC = bottom
+		if bottom == 'FluxI' or bottom == 'FluxW':
+			try:
+				self.botT = kwargs['botT']
+			except:
+				raise Exception('Bottom boundary condition temperature not chosen\n\t->ex: '
+				                'model.set_boundaryconditions(bottom=\'FluxI\', botT=260);')
 		self.sidesBC = sides
+		if sides == 'RFlux':
+			try:
+				self.dL = kwargs['dL']
+			except:
+				raise Exception('Length for right side flux not chosen\n\t->model.set_boundaryconditions('
+				                'sides=\'RFlux\', dL=500e3)')
 
 	def update_salinity(self, phi_last):
 		"""
@@ -319,7 +336,7 @@ class HeatSolver:
 
 		self.Q = self.tidal_heat - self.latent_heat
 
-	def apply_boundary_conditions(self, T):
+	def apply_boundary_conditions(self):
 		"""Applies chosen boundary conditions during simulation run."""
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
@@ -332,24 +349,21 @@ class HeatSolver:
 			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
 			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
 			Tbotz = c / self.dz ** 2 * (
-						(self.k[-1, 1:-1] + self.constants.ac / T_bot_out) * (T_bot_out - self.T[-1, 1:-1]) \
+						(self.k[-1, 1:-1] + self.constants.ac / T_bot_out) * (T_bot_out - self.T[-1, :-1]) \
 						- (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
 			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
 
-		elif self.botBC == 'FluxO':  # constant temperature ocean
+		elif self.botBC == 'FluxI' or self.botBC == 'FluxW':  # constant temperature ice
 			c = self.dt / (2 * self.rhoc[-1, 1:-1])
+
+			if self.botBC == 'FluxI':
+				kbot = self.constants.ac / self.botT
+			elif self.botBC == 'FluxW':
+				kbot = self.constants.kw
 
 			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
 			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
-			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + self.constants.kw) * (self.Tbot - self.T[-1, 1:-1]) \
-			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
-			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
-
-		elif self.botBC == 'FluxC':  # constant temperature convective layer
-			c = self.dt / (2 * self.rhoc[-1, 1:-1])
-			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
-			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
-			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + self.constants.ac / 260.) * (self.Tbot - self.T[-1, 1:-1]) \
+			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + kbot) * (self.botT - self.T[-1, 1:-1]) \
 			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
 			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
 
@@ -359,6 +373,7 @@ class HeatSolver:
 
 		elif self.topBC == 'Flux':
 			T_top_out = self.Tsurf * (self.Tbot / self.Tsurf) ** (-self.dz / self.Lz)
+
 			if self.cpT is True:
 				Cbc = self.rhoc[0, 1:-1] / (self.constants.rho_i * (185. + 2 * 7.037 * T_top_out))
 			else:
@@ -368,17 +383,53 @@ class HeatSolver:
 			                            - (self.k[0, 1:-1] + self.k[0, :-2]) * (self.T[0, 1:-1] - self.T[0, :-2]))
 			Ttopz = c / self.dz ** 2 * ((self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0, 1:-1]) \
 			                            - (self.k[0, 1:-1] + Cbc * self.constants.ac / T_top_out) * (
-					                            self.T[0, 1:-1] - T_top_out))
+						                            self.T[0, 1:-1] - T_top_out))
 			self.T[0, 1:-1] = self.T[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
+
+		'''
+		elif self.topBC == 'Radiative':
+			c = self.dt / (2 * self.rhoc[0, 1:-1])
+			Ttopx = c / self.dx ** 2 * ((self.k[0, 1:-1] + self.k[0, 2:]) * (self.T[0, 2:] - self.T[0, 1:-1]) \
+			                            - (self.k[0, 1:-1] + self.k[0, :-2]) * (self.T[0, 1:-1] - self.T[0, :-2]))
+			Ttopz = c / self.dz**2 * ((self.k[0,1:-1] + self.k[1,1:-1]) * (self.T[1, 1:-1] - self.T[0, 1:-1]) \
+			                           - self.dz * self.constants.emiss * self.constants.stfblt \
+			                           * (T[0,1:-1]**4 - self.Tsurf**4))
+			self.T[0, 1:-1] = self.T[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
+		'''
 
 		# apply chosen boundary conditions at sides of domain
 		if self.sidesBC == True:
 			self.T[:, 0] = self.Tedge.copy()
 			self.T[:, self.nx - 1] = self.Tedge.copy()
 
-		elif self.sidesBC == 'Reflect':
+		elif self.sidesBC == 'NoFlux':
 			self.T[:, 0] = self.T[:, 1].copy()
 			self.T[:, -1] = self.T[:, -2].copy()
+
+		elif self.sidesBC == 'RFlux':
+			# left side of domain uses 'NoFlux'
+			self.T[:, 0] = self.T[:, 1].copy()
+
+			# right side of domain
+			c = self.dt / (2 * self.rhoc[1:-1, -1])
+			TRX = c * ((self.k[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * (self.Tedge[1:-1] - self.T[1:-1, -1]) \
+			           - (self.k[1:-1, -1] + self.k[1:-1, -2]) * (self.T[1:-1, -1] - self.T[1:-1, -2])) / self.dL
+			TRZ = c * ((self.k[1:-1, -1] + self.k[2:, -1]) * (self.T[2:, -1] - self.T[1:-1, -1]) \
+			           - (self.k[1:-1, -1] + self.k[:-2, -1]) * (self.T[1:-1, -1] - self.T[:-2, -1])) / self.dz ** 2
+			self.T[1:-1, -1] = self.T[1:-1, -1] + TRX + TRZ + self.Q[:, -1] * 2 * c
+
+	def get_gradients(self, T_last):
+		# constant in front of x-terms
+		Cx = self.dt / (2 * self.rhoc[1:-1, 1:-1] * self.dx ** 2)
+		# temperature terms in x direction
+		Tx = Cx * ((self.k[1:-1, 1:-1] + self.k[1:-1, 2:]) * (T_last[1:-1, 2:] - T_last[1:-1, 1:-1]) \
+		           - (self.k[1:-1, 1:-1] + self.k[1:-1, :-2]) * (T_last[1:-1, 1:-1] - T_last[1:-1, :-2]))
+		# constant in front of z-terms
+		Cz = self.dt / (2 * self.rhoc[1:-1, 1:-1] * self.dz ** 2)
+		# temperature terms in z direction
+		Tz = Cz * ((self.k[1:-1, 1:-1] + self.k[2:, 1:-1]) * (T_last[2:, 1:-1] - T_last[1:-1, 1:-1]) \
+		           - (self.k[1:-1, 1:-1] + self.k[:-2, 1:-1]) * (T_last[1:-1, 1:-1] - T_last[:-2, 1:-1]))
+		return Tx, Tz
 
 	def print_all_options(self, nt):
 		"""Prints options chosen for simulation."""
@@ -468,16 +519,7 @@ class HeatSolver:
 			while (TErr > self.Ttol) and (phiErr > self.phitol):
 				T_last, phi_last = self.T.copy(), self.phi.copy()
 
-				# constant in front of x-terms
-				Cx = self.dt / (2 * self.rhoc[1:-1, 1:-1] * self.dx ** 2)
-				# constant in front of z-terms
-				Cz = self.dt / (2 * self.rhoc[1:-1, 1:-1] * self.dz ** 2)
-				# temperature terms in z direction
-				Tz = Cz * ((self.k[1:-1, 1:-1] + self.k[2:, 1:-1]) * (T_last[2:, 1:-1] - T_last[1:-1, 1:-1]) \
-				           - (self.k[1:-1, 1:-1] + self.k[:-2, 1:-1]) * (T_last[1:-1, 1:-1] - T_last[:-2, 1:-1]))
-				# temperature terms in x direction
-				Tx = Cx * ((self.k[1:-1, 1:-1] + self.k[1:-1, 2:]) * (T_last[1:-1, 2:] - T_last[1:-1, 1:-1]) \
-				           - (self.k[1:-1, 1:-1] + self.k[1:-1, :-2]) * (T_last[1:-1, 1:-1] - T_last[1:-1, :-2]))
+				Tx, Tz = self.get_gradients(T_last)
 
 				self.update_liquid_fraction(phi_last=phi_last)
 				if self.issalt: self.saturated = self.update_salinity(phi_last=phi_last)
@@ -485,7 +527,7 @@ class HeatSolver:
 				self.update_sources_sinks(phi_last=phi_last, T_last=T_last)
 
 				self.T[1:-1, 1:-1] = T_last[1:-1, 1:-1] + Tx + Tz + self.Q * self.dt / self.rhoc[1:-1, 1:-1]
-				self.apply_boundary_conditions(T=T_last)
+				self.apply_boundary_conditions()
 
 				TErr = (abs(self.T[1:-1, 1:-1] - T_last[1:-1, 1:-1])).max()
 				phiErr = (abs(self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1])).max()
@@ -514,7 +556,7 @@ class HeatSolver:
 					self.run_time = _timer_.clock() - start_time
 					return self.model_time
 
-			del T_last, phi_last, Cx, Cz, Tx, Tz, iter_k, TErr, phiErr
+			del T_last, phi_last, Tx, Tz, iter_k, TErr, phiErr
 
 		self.run_time = _timer_.clock() - start_time
 
@@ -563,8 +605,10 @@ class HeatSolver:
 			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
 
 			self.stefan.zm = 2 * lam * np.sqrt(kappa * t)
+
 			def zm_func(t):
 				return 2 * lam * np.sqrt(kappa * t)
+
 			self.stefan.zm_func = zm_func
 			self.stefan.zm_const = 2 * lam * np.sqrt(kappa)
 			# self.stefan_time_frozen = (self.thickness / (2 * lam)) ** 2 / kappa

@@ -98,19 +98,75 @@ model.freezestop = 1
 model.solve_heat(nt=5000000000000000, dt=time_step)
 ```
 
-Compare initial and final salinity profiles through the middle of the intrusion
+Compare initial and final salinity profiles through a verticle slice through the shell at the middle of the intrusion
 ```python
-plt.plot(model.S_initial[:,1], model.Z[:,1],label='initial')
-plt.plot(model.S[:,1], model.Z[:,1], label='final')
+plt.plot(model.S_initial[:, 1], model.Z[:, 1], label='initial')
+plt.plot(model.S[:, 1], model.Z[:, 1], label='final')
 plt.xlabel('ppt NaCl')
-plt.ylabel('Depth, m')
+plt.ylabel('depth, m')
 plt.gca().invert_yaxis()
 plt.legend()
 plt.show()
 ```
 
+## Save & Load/Using Outputs
+The `HeatSolver.outputs` class puts requested data in a numpy array as a time series that can be saved and loaded for
+ later. Below is an example of that.
+ 
+ Assuming the above model was run to the desired results, we must save the model and all inputs  as a separate file
+  from the results. 
+```python
+model.outputs.transient_results = model.outputs.get_all_data(model)
+# save model data
+save_data(model, model_filename, outputdirectory)
+# save results data
+save_data(model.outputs.transient_results, results_filename, outputdirectory)
+```
+The `save_model` function will save it with a chosen filename `..._filename` plus some of the model parameters for
+ later identification.
+
+Loading the data later
+```python
+# load model data
+model = load_data(outputdirectory+model_filename)
+# load results data
+results = load_data(outputdirectory+results_filename)
+```
+See what results were saved
+```python
+>>> results.keys()
+dict_keys(['time', 'T', 'phi', 'k', 'S', 'Q', 'h', 'freeze fronts', 'r', 'percent frozen'])
+```
+Plot a time series of the thickness through time
+```python
+plt.figure()
+plt.plot(results['time'], results['h'])
+plt.xlabel('time, s')
+plt.ylabe('intrusion thickness, m')
+plt.show()
+```
+Note that the structure of the grid results, i.e. `results['T'], results['phi']`, etc., are structured `results['T
+'][time, Z, X]`. For example, or an output frequency of 50 years, the temperature grid can be accessed at 10,000
+ years in the simulation with `results['T'][200]`. The point `X=1e3 #m, Z=1e3 #m` with spatial grid size `dz = dx = 50#m` can be
+  seen through time with `results['T'][:,20,20]`. The shapes of each results can be seen
+```python
+>>>for key in res:
+...   print(key, numpy.shape(res[key]))
+time (382,)
+T (382, 501, 601)
+phi (382, 501, 601)
+k (382, 501, 601)
+S (382, 501, 601)
+Q (382, 499, 599)
+h (382,)
+freeze fronts (382, 2)
+r (382,)
+percent frozen (382,)
+```
+
+
 # Package dependencies
-Packages used here are generally in the standard library or in standard usage [SciPy](https://www.scipy.org/), 
+Packages used here are generally in the standard library or in standard usage: [SciPy](https://www.scipy.org/), 
 [NumPy](https://www.numpy.org/), and [matplotlib](https://matplotlib.org/) for plotting. 
 
 Outside of these, the [dill](https://pypi.org/project/dill/) package is used in `utility_funcs.py` for saving results.
