@@ -200,10 +200,10 @@ class HeatSolver:
 						edges of domain
 				'NoFlux : a 'no flux' boundary condition
 							-> boundaries are forced to be the same temperature as the adjacent cells in the domain
-				'RFlux' : 'NoFlux' boundary condition on the left, with a flux boundary at T(z,x=Lx,t) = Tedge(z)
-						that is dL far away. Most useful when using the symmetry about x option.
-						dL value must be chosen when using this option:
-						ex: model.set_boundaryconditions(sides='RFlux', dL=500e3)
+				'RFlux' : 'NoFlux' boundary condition on the left, with a constant flux boundary (i.e. infinity-like) at
+						T(z,x=Lxt) = Tedge(z) that is dL far away. Most useful when using the symmetry about x option.
+						*NOTE: dL value must be chosen when using this option:
+						   ex: model.set_boundaryconditions(sides='RFlux', dL=500e3)
 		"""
 
 		self.topBC = top
@@ -412,8 +412,9 @@ class HeatSolver:
 
 			# right side of domain
 			c = self.dt / (2 * self.rhoc[1:-1, -1])
-			TRX = c * ((self.k[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * (self.Tedge[1:-1] - self.T[1:-1, -1]) \
-			           - (self.k[1:-1, -1] + self.k[1:-1, -2]) * (self.T[1:-1, -1] - self.T[1:-1, -2])) / self.dL
+			TRX = c * ((self.k[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * (
+						self.Tedge[1:-1] - self.T[1:-1, -1]) / self.dx \
+			           - (self.k[1:-1, -1] + self.k[1:-1, -2]) * (self.T[1:-1, -1] - self.T[1:-1, -2]) / self.dL)
 			TRZ = c * ((self.k[1:-1, -1] + self.k[2:, -1]) * (self.T[2:, -1] - self.T[1:-1, -1]) \
 			           - (self.k[1:-1, -1] + self.k[:-2, -1]) * (self.T[1:-1, -1] - self.T[:-2, -1])) / self.dz ** 2
 			self.T[1:-1, -1] = self.T[1:-1, -1] + TRX + TRZ + self.Q[:, -1] * 2 * c
