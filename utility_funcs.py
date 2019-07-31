@@ -16,7 +16,8 @@ def file_namer(model, outputdir, *argv):
 	            'tidalheat': False, 'nx': model.nx, 'nz': model.nz, 'T_int': 273.15, 'depth': 0, 'R_int': 0,
 	            'thickness': 0, 'freezestop': model.freezestop, 'num_iter': model.num_iter,
 	            'model_time': model.model_time, 'run_time': model.run_time, 'Ttol': 0.1, 'phitol': 0.01,
-	            'symmetric': 0, 'Stol': 1, 'cp_i': model.cp_i, 'tidal_heat': model.tidal_heat}
+	            'symmetric': 0, 'Stol': 1, 'cp_i': model.cp_i, 'tidal_heat': model.tidal_heat, 'dL': 0,
+	            'botT': 0}
 	if model.issalt:
 		defaults['C_rho'] = model.C_rho
 		defaults['Ci_rho'] = model.Ci_rho
