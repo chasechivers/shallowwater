@@ -231,10 +231,11 @@ class HeatSolver:
 			z_ni, x_ni = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
 			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
 			vol = np.shape(water)[1]  # calculate "volume" of water
-			rejected_salt = 0  # initialize amount of salt rejected, ppt
+			# rejected_salt = 0  # initialize amount of salt rejected, ppt
 			self.removed_salt.append(0)  # start catalogue of salt removed from system
 
 			if len(z_ni) > 0 and vol != 0:  # iterate over cells where ice has just formed
+				'''
 				Sn = self.S.copy()
 				for i in range(len(z_ni)):
 					# save starting salinity in cell
@@ -255,10 +256,12 @@ class HeatSolver:
 						dT = (dTx + abs(dTz)) / 2  # average over both
 						# salt entrained in newly formed ice determined by Buffo et al., 2019 results. (See
 						# IceSystem.entrain_salt() function)
-						self.S[z_ni[i], x_ni[i]] = self.entrain_salt(dT, S_old)
+						self.S[z_ni[i], x_ni[i]] = self.entrain_salt(dT, S_old, self.composition)
 						# not all salt will be entrained in ice, some will be mixed back into
-				# rejected_salt += S_old - self.S[z_ni[i], x_ni[i]]
-
+					# rejected_salt += S_old - self.S[z_ni[i], x_ni[i]]
+				
+				# assume the salt is well mixed into remaining liquid solution in time step dt
+				self.S[water] = self.S[water] + (Sn.sum() - self.S.sum()) / vol
 				'''
 				#  attempt at vectorizing the salt parameterization but it ends up being slower (?)
 				#   unless entrain_salt can be rewritten without the for-loop
@@ -267,7 +270,7 @@ class HeatSolver:
 				dTz = (self.T[:-2,:] - self.T[2:,:]) / (2 * self.dz)
 				dTx = abs(self.T[:,:-2] - self.T[:,2:]) / (2 * self.dx)
 				grad = (abs(dTx[z_ni, x_ni-1]) + abs(dTz[z_ni-1, x_ni])) / 2
-				self.S[z_ni, x_ni] = self.entrain_salt(grad, self.S[z_ni, x_ni])
+				self.S[z_ni, x_ni] = self.entrain_salt(grad, self.S[z_ni, x_ni], self.composition)
 
 				# do bottom parameterization
 				new_dTz = dTz[z_ni-1, x_ni]
@@ -275,10 +278,6 @@ class HeatSolver:
 				self.S[z_ni[loc],x_ni[loc]] = S_old[z_ni[loc], x_ni[loc]]
 
 				self.S[water] = self.S[water] + (S_old.sum() - self.S.sum()) / vol
-				'''
-				
-				# assume the salt is well mixed into remaining liquid solution in time step dt
-				self.S[water] = self.S[water] + (Sn.sum() - self.S.sum()) / vol
 
 				# remove salt from system if liquid is above the saturation point
 				self.removed_salt[-1] += (self.S[self.S >= self.saturation_point] - self.saturation_point).sum()
@@ -356,9 +355,9 @@ class HeatSolver:
 			self.tidal_heat = (self.constants.eps0 ** 2 * self.constants.omega ** 2 * self.visc) / (
 					2 + 2 * self.constants.omega ** 2 * self.visc ** 2 / (self.constants.G ** 2))
 
-		self.Q = self.tidal_heat - self.latent_heat
+		return self.tidal_heat - self.latent_heat
 
-	def apply_boundary_conditions(self):
+	def apply_boundary_conditions(self, T_last):
 		"""Applies chosen boundary conditions during simulation run."""
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
@@ -368,12 +367,12 @@ class HeatSolver:
 			T_bot_out = self.Tsurf * (self.Tbot / self.Tsurf) ** ((self.Lz + self.dz) / self.Lz)
 			c = self.dt / (2 * self.rhoc[-1, 1:-1])
 
-			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
-			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
+			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (T_last[-1, 2:] - T_last[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (T_last[-1, 1:-1] - T_last[-1, :-2]))
 			Tbotz = c / self.dz ** 2 * (
-						(self.k[-1, 1:-1] + self.constants.ac / T_bot_out) * (T_bot_out - self.T[-1, :-1]) \
-						- (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
-			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
+					(self.k[-1, 1:-1] + self.constants.ac / T_bot_out) * (T_bot_out - T_last[-1, :-1]) \
+					- (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (T_last[-1, 1:-1] - T_last[-2, 1:-1]))
+			self.T[-1, 1:-1] = T_last[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
 
 		elif self.botBC == 'FluxI' or self.botBC == 'FluxW':  # constant temperature ice
 			c = self.dt / (2 * self.rhoc[-1, 1:-1])
@@ -383,11 +382,11 @@ class HeatSolver:
 			elif self.botBC == 'FluxW':
 				kbot = self.constants.kw
 
-			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (self.T[-1, 2:] - self.T[-1, 1:-1]) \
-			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (self.T[-1, 1:-1] - self.T[-1, :-2]))
-			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + kbot) * (self.botT - self.T[-1, 1:-1]) \
-			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (self.T[-1, 1:-1] - self.T[-2, 1:-1]))
-			self.T[-1, 1:-1] = self.T[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
+			Tbotx = c / self.dx ** 2 * ((self.k[-1, 1:-1] + self.k[-1, 2:]) * (T_last[-1, 2:] - T_last[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-1, :-2]) * (T_last[-1, 1:-1] - T_last[-1, :-2]))
+			Tbotz = c / self.dz ** 2 * ((self.k[-1, 1:-1] + kbot) * (self.botT - T_last[-1, 1:-1]) \
+			                            - (self.k[-1, 1:-1] + self.k[-2, 1:-1]) * (T_last[-1, 1:-1] - T_last[-2, 1:-1]))
+			self.T[-1, 1:-1] = T_last[-1, 1:-1] + Tbotx + Tbotz + self.Q[-1, :] * 2 * c
 
 		# apply chosen boundary conditions at top of domain
 		if self.topBC == True:
@@ -401,14 +400,15 @@ class HeatSolver:
 			else:
 				Cbc = 1
 			c = self.dt / (2 * self.rhoc[0, 1:-1])
-			Ttopx = c / self.dx ** 2 * ((self.k[0, 1:-1] + self.k[0, 2:]) * (self.T[0, 2:] - self.T[0, 1:-1]) \
-			                            - (self.k[0, 1:-1] + self.k[0, :-2]) * (self.T[0, 1:-1] - self.T[0, :-2]))
-			Ttopz = c / self.dz ** 2 * ((self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0, 1:-1]) \
+			Ttopx = c / self.dx ** 2 * ((self.k[0, 1:-1] + self.k[0, 2:]) * (T_last[0, 2:] - T_last[0, 1:-1]) \
+			                            - (self.k[0, 1:-1] + self.k[0, :-2]) * (T_last[0, 1:-1] - T_last[0, :-2]))
+			Ttopz = c / self.dz ** 2 * ((self.k[0, 1:-1] + self.k[1, 1:-1]) * (T_last[1, 1:-1] - T_last[0, 1:-1]) \
 			                            - (self.k[0, 1:-1] + Cbc * self.constants.ac / T_top_out) * (
-						                            self.T[0, 1:-1] - T_top_out))
-			self.T[0, 1:-1] = self.T[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
+					                            T_last[0, 1:-1] - T_top_out))
+			self.T[0, 1:-1] = T_last[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
 
 		'''
+		# Attempt at a radiative boundary condition: does not work as intended
 		elif self.topBC == 'Radiative':
 			c = self.dt / (2 * self.rhoc[0, 1:-1])
 			Ttopx = c / self.dx ** 2 * ((self.k[0, 1:-1] + self.k[0, 2:]) * (self.T[0, 2:] - self.T[0, 1:-1]) \
@@ -425,21 +425,21 @@ class HeatSolver:
 			self.T[:, self.nx - 1] = self.Tedge.copy()
 
 		elif self.sidesBC == 'NoFlux':
-			self.T[:, 0] = self.T[:, 1].copy()
-			self.T[:, -1] = self.T[:, -2].copy()
+			self.T[:, 0] = T_last[:, 1].copy()
+			self.T[:, -1] = T_last[:, -2].copy()
 
 		elif self.sidesBC == 'RFlux':
 			# left side of domain uses 'NoFlux'
-			self.T[:, 0] = self.T[:, 1].copy()
+			self.T[:, 0] = T_last[:, 1].copy()
 
 			# right side of domain
 			c = self.dt / (2 * self.rhoc[1:-1, -1])
 			TRX = c * ((self.k[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * (
-						self.Tedge[1:-1] - self.T[1:-1, -1]) / self.dx \
-			           - (self.k[1:-1, -1] + self.k[1:-1, -2]) * (self.T[1:-1, -1] - self.T[1:-1, -2]) / self.dL)
-			TRZ = c * ((self.k[1:-1, -1] + self.k[2:, -1]) * (self.T[2:, -1] - self.T[1:-1, -1]) \
-			           - (self.k[1:-1, -1] + self.k[:-2, -1]) * (self.T[1:-1, -1] - self.T[:-2, -1])) / self.dz ** 2
-			self.T[1:-1, -1] = self.T[1:-1, -1] + TRX + TRZ + self.Q[:, -1] * 2 * c
+						self.Tedge[1:-1] - T_last[1:-1, -1]) / self.dx \
+			           - (self.k[1:-1, -1] + self.k[1:-1, -2]) * (T_last[1:-1, -1] - T_last[1:-1, -2]) / self.dL)
+			TRZ = c * ((self.k[1:-1, -1] + self.k[2:, -1]) * (T_last[2:, -1] - T_last[1:-1, -1]) \
+			           - (self.k[1:-1, -1] + self.k[:-2, -1]) * (T_last[1:-1, -1] - T_last[:-2, -1])) / self.dz ** 2
+			self.T[1:-1, -1] = T_last[1:-1, -1] + TRX + TRZ + self.Q[:, -1] * 2 * c
 
 	def get_gradients(self, T_last):
 		# constant in front of x-terms
@@ -547,10 +547,10 @@ class HeatSolver:
 				self.update_liquid_fraction(phi_last=phi_last)
 				if self.issalt: self.saturated = self.update_salinity(phi_last=phi_last)
 				self.update_volume_averages()
-				self.update_sources_sinks(phi_last=phi_last, T_last=T_last)
+				self.Q = self.update_sources_sinks(phi_last=phi_last, T_last=T_last)
+				self.apply_boundary_conditions(T_last=T_last)
 
 				self.T[1:-1, 1:-1] = T_last[1:-1, 1:-1] + Tx + Tz + self.Q * self.dt / self.rhoc[1:-1, 1:-1]
-				self.apply_boundary_conditions()
 
 				TErr = (abs(self.T[1:-1, 1:-1] - T_last[1:-1, 1:-1])).max()
 				phiErr = (abs(self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1])).max()
