@@ -437,6 +437,7 @@ class IceSystem(HeatSolver):
 			self.saturation_point = 260.  # ppt, saturation concentration of NaCl in water
 			self.constants.rho_s = 2160.  # kg/m^3, density of NaCl
 
+		# save array of concentrations for chosen composition for entraining salt in ice
 		self.concentrations = np.sort([key for key in self.shallow_consts[composition]])
 
 		if S is not None:
@@ -497,7 +498,7 @@ class IceSystem(HeatSolver):
 			pass
 		self.save_initials()
 
-	def entrain_salt(self, dT, S, composition='MgSO4'):
+	def entrain_salt(self, dT, S, composition):
 		"""
 		Calculate the amount of salt entrained in newly frozen ice that is dependent on the thermal gradient across
 		the ice (Buffo et al., 2019).
