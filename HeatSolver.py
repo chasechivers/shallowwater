@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 7/10/19
+# Last updated: 8/13/19
 
 import numpy as np
 import time as _timer_
@@ -40,7 +40,6 @@ class HeatSolver:
 
 	class outputs:
 		"""Class structure to help define and calculate desired outputs of a simulation."""
-
 		def __init__(self):
 			self.outputs.tmp_data_directory = ''
 			self.outputs.tmp_data_file_name = ''
@@ -200,10 +199,10 @@ class HeatSolver:
 						edges of domain
 				'NoFlux : a 'no flux' boundary condition
 							-> boundaries are forced to be the same temperature as the adjacent cells in the domain
-				'RFlux' : 'NoFlux' boundary condition on the left, with a constant flux boundary (i.e. infinity-like) at
-						T(z,x=Lxt) = Tedge(z) that is dL far away. Most useful when using the symmetry about x option.
-						*NOTE: dL value must be chosen when using this option:
-						   ex: model.set_boundaryconditions(sides='RFlux', dL=500e3)
+				'RFlux' : 'NoFlux' boundary condition on the left, with a flux boundary at T(z,x=Lx,t) = Tedge(z)
+						that is dL far away. Most useful when using the symmetry about x option.
+						dL value must be chosen when using this option:
+						ex: model.set_boundaryconditions(sides='RFlux', dL=500e3)
 		"""
 
 		self.topBC = top
@@ -229,41 +228,62 @@ class HeatSolver:
 		"""
 
 		if self.issalt:
-			new_ice = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
+			z_ni, x_ni = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
 			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
 			vol = np.shape(water)[1]  # calculate "volume" of water
 			rejected_salt = 0  # initialize amount of salt rejected, ppt
 			self.removed_salt.append(0)  # start catalogue of salt removed from system
-			if len(new_ice[0]) > 0 and vol != 0:  # iterate over cells where ice has just formed
-				for i in range(len(new_ice[0])):
+
+			if len(z_ni) > 0 and vol != 0:  # iterate over cells where ice has just formed
+				Sn = self.S.copy()
+				for i in range(len(z_ni)):
 					# save starting salinity in cell
-					S_old = self.S[new_ice[0][i], new_ice[1][i]]
+					S_old = self.S[z_ni[i], x_ni[i]]
 					# calculate thermal gradients across each cell
-					dTx = abs(self.T[new_ice[0][i], new_ice[1][i] - 1] - self.T[new_ice[0][i], new_ice[1][i] + 1]) / (
-							2 * self.dx)
-					dTz = (self.T[new_ice[0][i] - 1, new_ice[1][i]] - self.T[new_ice[0][i] + 1, new_ice[1][i]]) / (
-							2 * self.dz)
+					dTx = abs(self.T[z_ni[i], x_ni[i] - 1] - self.T[z_ni[i], x_ni[i] + 1]) / (2 * self.dx)
+					dTz = (self.T[z_ni[i] - 1, x_ni[i]] - self.T[z_ni[i] + 1, x_ni[i]]) / (2 * self.dz)
+
 					# brine drainage parameterization:
 					#  bottom of intrusion -> no gravity-drainage, salt stays
 					if dTz > 0:
-						self.S[new_ice[0][i], new_ice[1][i]] = S_old
+						self.S[z_ni[i], x_ni[i]] = S_old
 
 					#  top of intrusion -> brine drains and rejects salt
 					elif dTz < 0:
 						# dT = np.hypot(dTx, dTz)  # gradient across the diagonal of the cell
 						# dT = max(abs(dTx), abs(dTz))  # maximum value
-						dT = (abs(dTx) + abs(dTz)) / 2  # average over both
+						dT = (dTx + abs(dTz)) / 2  # average over both
 						# salt entrained in newly formed ice determined by Buffo et al., 2019 results. (See
 						# IceSystem.entrain_salt() function)
-						self.S[new_ice[0][i], new_ice[1][i]] = self.entrain_salt(dT, S_old)
+						self.S[z_ni[i], x_ni[i]] = self.entrain_salt(dT, S_old)
 						# not all salt will be entrained in ice, some will be mixed back into
-						rejected_salt += S_old - self.S[new_ice[0][i], new_ice[1][i]]
+				# rejected_salt += S_old - self.S[z_ni[i], x_ni[i]]
 
+				'''
+				#  attempt at vectorizing the salt parameterization but it ends up being slower (?)
+				#   unless entrain_salt can be rewritten without the for-loop
+
+				S_old = self.S.copy()
+				dTz = (self.T[:-2,:] - self.T[2:,:]) / (2 * self.dz)
+				dTx = abs(self.T[:,:-2] - self.T[:,2:]) / (2 * self.dx)
+				grad = (abs(dTx[z_ni, x_ni-1]) + abs(dTz[z_ni-1, x_ni])) / 2
+				self.S[z_ni, x_ni] = self.entrain_salt(grad, self.S[z_ni, x_ni])
+
+				# do bottom parameterization
+				new_dTz = dTz[z_ni-1, x_ni]
+				loc = np.where(new_dTz > 0)[0]
+				self.S[z_ni[loc],x_ni[loc]] = S_old[z_ni[loc], x_ni[loc]]
+
+				self.S[water] = self.S[water] + (S_old.sum() - self.S.sum()) / vol
+				'''
+				
 				# assume the salt is well mixed into remaining liquid solution in time step dt
-				if vol != 0: self.S[water] = self.S[water] + rejected_salt / vol
+				self.S[water] = self.S[water] + (Sn.sum() - self.S.sum()) / vol
+
 				# remove salt from system if liquid is above the saturation point
 				self.removed_salt[-1] += (self.S[self.S >= self.saturation_point] - self.saturation_point).sum()
-				# ensure liquid hits only the saturation point
+
+				# ensure liquid hits only the saturation concentration
 				self.S[self.S > self.saturation_point] = self.saturation_point
 
 			# check mass conservation
@@ -274,6 +294,8 @@ class HeatSolver:
 				self.total_salt.append(total_S_new)
 				raise Exception('Mass not being conserved')
 
+			# outdated usage, may delete at some point
+			#   however, it can be used to stop simulation after liquid becomes saturated
 			if (self.S[water] >= self.saturation_point).all() and water[0].sum() > 0:
 				return 1
 			else:
@@ -557,7 +579,7 @@ class HeatSolver:
 					self.run_time = _timer_.clock() - start_time
 					return self.model_time
 
-			del T_last, phi_last, Tx, Tz, iter_k, TErr, phiErr
+		# del T_last, phi_last, Tx, Tz, iter_k, TErr, phiErr
 
 		self.run_time = _timer_.clock() - start_time
 

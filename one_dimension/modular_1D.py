@@ -201,6 +201,7 @@ class HeatSolver:
 			Trad = c * ((self.k[1] + self.k[0]) * (Tn[1] - Tn[0])
 			            - 2 * self.dz * self.constants.emiss * self.constants.stfblt * (Tn[0] - self.Tsurf) ** 4)
 			self.T[0] = Tn[0] + Trad + self.Q[0]
+
 		elif self.topBC == 'NoFlux':
 			c = self.dt / (2 * self.rhoc[0] * self.dz ** 2)
 			self.T[0] = Tn[0] + c * (self.k[1] + self.k[0]) * (Tn[1] - Tn[0]) + self.Q[0]
@@ -239,67 +240,7 @@ class HeatSolver:
 			if self.salinity_profile_time:
 				self.outputs.S_profile.append(self.S.copy())
 
-	class stefan:
-		def solution(self, t, T1, T0):
-			'''
-			Analytic solution to Stefan problem for validation. Input is time
-			'''
-			from scipy import optimize
-			from scipy.special import erf
-			from numpy import linspace
-			if self.Tsurf > self.Tbot:
-				kappa = self.constants.kw / (self.constants.cp_w * self.constants.rho_w)
-				Stf = self.constants.cp_w * (T1 - T0) / self.constants.Lf
-			elif self.Tsurf < self.Tbot:
-				kappa = self.constants.ki / (self.constants.cp_i * self.constants.rho_i)
-				Stf = self.constants.cp_i * (T0 - T1) / self.constants.Lf
-			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
 
-			self.stefan_zm = 2 * lam * np.sqrt(kappa * t)
-			self.stefan_zm_func = lambda time: 2 * lam * np.sqrt(kappa * time)
-			self.stefan_zm_const = 2 * lam * np.sqrt(kappa)
-			self.stefan_z = linspace(0, self.stefan_zm)
-			self.stefan_T = T1 - (T1 - T0) * erf(self.stefan_z / (2 * np.sqrt(kappa * t))) / erf(lam)
-
-		def compare(self, dt):
-			'''
-			Compare simulation freezing front propagation zm(t) with stefan solution
-			Parameters:
-					dt : float
-						time step
-			'''
-			self.dt = dt
-			self._time_ = [0]
-			self.freeze_front = [0]
-			n = 1
-			while self.freeze_front[-1] < 0.9 * self.Lz:
-				TErr, phiErr = np.inf, np.inf
-				iter_k = 0
-				while (TErr > self.Ttol) & (phiErr > self.phitol):
-					Tn, phin = self.T.copy(), self.phi.copy()
-					self.update_liquid_fraction(phi_last=phin)
-					self.update_salinity(phi_last=phin)
-					self.update_vol_avg()
-					C = self.dt / (2 * self.rhoc[1:-1] * self.dz ** 2)
-					Tz = C * ((self.k[2:] + self.k[1:-1]) * (Tn[2:] - Tn[1:-1])
-					          - (self.k[:-2] + self.k[1:-1]) * (Tn[1:-1] - Tn[:-2]))
-					self.update_Q(phi_last=phin)
-					self.T[1:-1] = Tn[1:-1] + Tz + self.Q
-					self.apply_BC(Tn)
-
-					TErr = np.amax(abs(self.T[1:-1] - Tn[1:-1]))
-					phiErr = np.amax(abs(self.phi[1:-1] - phin[1:-1]))
-					iter_k += 1
-
-				if (self.phi == 0).any():
-					idx = np.max(np.where(self.phi == 0))
-					if self.z[idx] != self.freeze_front[-1]:
-						self.freeze_front.append(self.z[idx])
-						self._time_.append(n * self.dt)
-				else:
-					self.freeze_front.append(0)
-				n += 1
-			self.get_outputs(n)
 
 	def solve_heat(self, nt, dt):
 		self.dt = dt
@@ -318,8 +259,12 @@ class HeatSolver:
 
 				self.update_vol_avg()
 				C = self.dt / (2 * self.rhoc[1:-1] * self.dz ** 2)
-				Tz = C * ((self.k[2:] + self.k[1:-1]) * (Tn[2:] - Tn[1:-1])
+				# Tz = C * ((2*self.k[2:]*self.k[1:-1])/(self.k[2:] + self.k[1:-1]) * (Tn[2:] - Tn[1:-1])  \
+				#	- (2*self.k[:-2]*self.k[1:-1])/(self.k[:-2]*self.k[1:-1]) * (Tn[1:-1] - Tn[:-2]))
+
+				Tz = C * ((self.k[2:] + self.k[1:-1]) * (Tn[2:] - Tn[1:-1]) \
 				          - (self.k[:-2] + self.k[1:-1]) * (Tn[1:-1] - Tn[:-2]))
+
 				self.update_Q(phi_last=phin)
 				self.T[1:-1] = Tn[1:-1] + Tz + self.Q
 				self.apply_BC(Tn)
@@ -328,24 +273,25 @@ class HeatSolver:
 				phiErr = np.amax(abs(self.phi[1:-1] - phin[1:-1]))
 				iter_k += 1
 
-			# if n%1000==0:
-			#	plt.figure(1001)
-			#	plt.clf()
-			#	plt.title('t={:0.03f}s\n={:0.03f}yr'.format(n*dt, n*dt/self.constants.styr))
-			#	plt.scatter(self.S, self.z, c=self.T, cmap='cividis',vmin=self.Tsurf, vmax=273.15)
-			#	plt.colorbar()
-			#	#plt.xlim(self.Tsurf, self.Tbot)
-			#	plt.gca().invert_yaxis()
-			#	plt.ylim(self.Lz, 0)
-			#
-			#	plt.figure(1002)
-			#	plt.clf()
-			#	plt.scatter(self.phi, self.z, c=self.S, cmap='cividis')
-			#	plt.colorbar(label='temp (K)')
-			#	plt.gca().invert_yaxis()
-			#	plt.ylim(self.depth+self.thickness, self.depth)
-			#	plt.xlim(0,1)
-			#	plt.pause(0.00000000000001)
+			if n % 1000 == 0:
+				plt.figure(1001)
+				plt.clf()
+				plt.title('t={:0.03f}s\n={:0.03f}yr'.format(n * dt, n * dt / self.constants.styr))
+				plt.scatter(self.T, self.z, c=self.k, cmap='cividis')  # , vmax=567/self.Tsurf, vmin=567/273.15)
+				plt.colorbar()
+				# plt.xlim(self.Tsurf, self.Tbot)
+				plt.gca().invert_yaxis()
+				plt.ylim(self.Lz, 0)
+				plt.pause(0.00000000000001)
+
+				plt.figure(1002)
+				plt.clf()
+				plt.scatter(self.phi, self.z, c=self.k, cmap='cividis')
+				plt.colorbar(label='k')
+				plt.gca().invert_yaxis()
+				plt.ylim(self.depth + self.thickness, self.depth)
+				plt.xlim(0, 1)
+				plt.pause(0.00000000000001)
 
 			if self.freezestop is True:
 				if len(self.phi[self.phi > 0]) == 0:
@@ -560,3 +506,61 @@ class IceSystem(HeatSolver, MechanicalSolver, Plotter):
 			for i in range(len(dT)):
 				ans[i] = self.entrained_S(dT[i], S[i], composition)
 			return ans
+
+
+'''
+	class stefan:
+		def solution(self, t, T1, T0):
+
+			from scipy import optimize
+			from scipy.special import erf
+			from numpy import linspace
+			if self.Tsurf > self.Tbot:
+				kappa = self.constants.kw / (self.constants.cp_w * self.constants.rho_w)
+				Stf = self.constants.cp_w * (T1 - T0) / self.constants.Lf
+			elif self.Tsurf < self.Tbot:
+				kappa = self.constants.ki / (self.constants.cp_i * self.constants.rho_i)
+				Stf = self.constants.cp_i * (T0 - T1) / self.constants.Lf
+			lam = optimize.root(lambda x: x * np.exp(x ** 2) * erf(x) - Stf / np.sqrt(np.pi), 1)['x'][0]
+
+			self.stefan_zm = 2 * lam * np.sqrt(kappa * t)
+			self.stefan_zm_func = lambda time: 2 * lam * np.sqrt(kappa * time)
+			self.stefan_zm_const = 2 * lam * np.sqrt(kappa)
+			self.stefan_z = linspace(0, self.stefan_zm)
+			self.stefan_T = T1 - (T1 - T0) * erf(self.stefan_z / (2 * np.sqrt(kappa * t))) / erf(lam)
+
+		def compare(self, dt):
+
+			self.dt = dt
+			self._time_ = [0]
+			self.freeze_front = [0]
+			n = 1
+			while self.freeze_front[-1] < 0.9 * self.Lz:
+				TErr, phiErr = np.inf, np.inf
+				iter_k = 0
+				while (TErr > self.Ttol) & (phiErr > self.phitol):
+					Tn, phin = self.T.copy(), self.phi.copy()
+					self.update_liquid_fraction(phi_last=phin)
+					self.update_salinity(phi_last=phin)
+					self.update_vol_avg()
+					C = self.dt / (2 * self.rhoc[1:-1] * self.dz ** 2)
+					Tz = C * ((self.k[2:] + self.k[1:-1]) * (Tn[2:] - Tn[1:-1])
+					          - (self.k[:-2] + self.k[1:-1]) * (Tn[1:-1] - Tn[:-2]))
+					self.update_Q(phi_last=phin)
+					self.T[1:-1] = Tn[1:-1] + Tz + self.Q
+					self.apply_BC(Tn)
+
+					TErr = np.amax(abs(self.T[1:-1] - Tn[1:-1]))
+					phiErr = np.amax(abs(self.phi[1:-1] - phin[1:-1]))
+					iter_k += 1
+
+				if (self.phi == 0).any():
+					idx = np.max(np.where(self.phi == 0))
+					if self.z[idx] != self.freeze_front[-1]:
+						self.freeze_front.append(self.z[idx])
+						self._time_.append(n * self.dt)
+				else:
+					self.freeze_front.append(0)
+				n += 1
+			self.get_outputs(n)
+'''
