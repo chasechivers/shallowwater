@@ -1,4 +1,4 @@
-# freeze_out
+# sill_freeze
 Two-dimensional thermal diffusion with salinity for liquid water in Europa's ice shell
 
 ## Model
@@ -184,4 +184,4 @@ $ pip install -r requirements.txt
 ```
 $ python cysetup.py build_ext --inplace
 ```
-Then any future call to import the `IceSystem` or `HeatSolver` modules will use the C-wrapped version
+Then any future call to import the `IceSystem` or `HeatSolver` modules will use the C-wrapped version. 
