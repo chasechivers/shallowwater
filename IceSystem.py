@@ -1,19 +1,10 @@
 # Author: Chase Chivers
-# Last updated: 8/13/19
-# Modular build for 2d heat diffusion problem
-#   applied to liquid water in the ice shell of Europa
+# Last updated: 9/10/19
+#  Object build for 2d heat diffusion problem applied to liquid water in the ice shell of Europa
 
 import numpy as np
 from scipy import optimize
 from HeatSolver import HeatSolver
-
-
-# Comment out for pace runs
-# import matplotlib.pyplot as plt
-# import matplotlib.colors as colors
-# import seaborn as sns
-# sns.set(palette='colorblind', color_codes=1, context='notebook', style='ticks')
-
 
 class IceSystem(HeatSolver):
 	"""
@@ -100,7 +91,7 @@ class IceSystem(HeatSolver):
 		emiss = 0.97  # pure ice emissivity
 		stfblt = 5.67e-8  # W/m2K4 stefan-boltzman constant
 
-		# Constants for viscosity dependent tidalheating
+		# Constants for viscosity dependent tida lheating
 		#   from Mitri & Showman (2005)
 		act_nrg = 26.  # activation energy for diffusive regime
 		Qs = 60e3  # J/mol, activation energy of ice (Goldsby & Kohlstadt, 2001)
@@ -212,7 +203,7 @@ class IceSystem(HeatSolver):
 			elif profile == 'stefan':
 				self.T[0, :] = Tsurf  # set the very top of grid to surface temperature
 				self.T[1:, :] = Tbot  # everything below is at the melting temperature
-				self.phi[:, :] = 1  # everything starts as liquid
+				self.phi[1:, :] = 1  # everything starts as liquid
 				profile += ' plus domain all water'
 
 			print('init_T(Tsurf = {}, Tbot = {})'.format(Tsurf, Tbot))
@@ -255,7 +246,7 @@ class IceSystem(HeatSolver):
 					radius = radius
 				r = np.where(abs(self.X[0, :]) <= radius)[0]
 				z = np.intersect1d(np.where(self.Z[:, 0] <= thickness + depth), np.where(self.Z[:, 0] >= depth))
-				tmp = np.zeros(np.shape(self.T))
+				tmp = np.zeros(self.T.shape)
 				tmp[z.min():z.max(), r.min():r.max() + 1] = 1
 				self.geom = np.where(tmp == 1)
 		# del tmp, r, z
