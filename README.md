@@ -190,4 +190,4 @@ $ pip install -r requirements.txt
 ```
 $ python cysetup.py build_ext --inplace
 ```
-Then any future call to import the `IceSystem` or `HeatSolver` modules will use the C-wrapped version
+Then any future call to import the `IceSystem` or `HeatSolver` modules will use the C-wrapped version. 
