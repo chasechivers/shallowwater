@@ -569,7 +569,7 @@ class HeatSolver:
 			T_last, phi_last = self.T.copy(), self.phi.copy()
 			k_last, rhoc_last = self.k.copy(), self.rhoc.copy()
 			iter_k = 0
-			while (TErr > self.Ttol) and (phiErr > self.phitol):
+			while (TErr > self.Ttol or phiErr > self.phitol):
 
 				Tx, Tz = self.get_gradients(T_last)
 				self.update_liquid_fraction(phi_last=phi_last)
@@ -669,7 +669,7 @@ class HeatSolver:
 				return 2 * lam * np.sqrt(Ki * t)
 			self.stefan.zm_func = zm_func
 			self.stefan.zi = np.linspace(0, self.stefan.zm, int(self.stefan.zm / self.dz))
-			self.stefan.Ti = Ti + (self.constants.Tm - Ti) * erf(self.stefan.zi / np.sqrt(4 * Ki * t))) / erf(lam)
+			self.stefan.Ti = Ti + (self.constants.Tm - Ti) * erf(self.stefan.zi / np.sqrt(4 * Ki * t)) / erf(lam)
 			self.stefan.zw = np.linspace(self.stefan.zm, self.Lz, int((self.Lz - self.stefan.zm) / self.dz))
 			self.stefan.Tw = Tw - (Tw - self.constants.Tm) * erfc(self.stefan.zw / np.sqrt(4 * Kw * t)) / erfc(v * lam)
 
@@ -699,7 +699,7 @@ class HeatSolver:
 				T_last, phi_last = self.T.copy(), self.phi.copy()
 				k_last, rhoc_last = self.k.copy(), self.rhoc.copy()
 				iter_k = 0
-				while (TErr > self.Ttol) and (phiErr > self.phitol):
+				while (TErr > self.Ttol or phiErr > self.phitol):
 
 					Tx, Tz = self.get_gradients(T_last)
 					self.update_liquid_fraction(phi_last=phi_last)
