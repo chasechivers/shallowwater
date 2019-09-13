@@ -7,6 +7,7 @@ def main(argv):
 	import os
 	cwd = os.getcwd()
 	dir = '/tmp/'
+	# directory i use on the GATech PACE cluster
 	outputdirectory = '/nv/hp5/cchivers3/scratch/'
 	Lz = 5e3
 	Lx = 6e3
