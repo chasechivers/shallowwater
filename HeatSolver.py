@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 9/10/19
+# Last updated: 10/28/19
 
 import numpy as np
 import time as _timer_
@@ -336,8 +336,12 @@ class HeatSolver:
 		else:
 			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
 
-		if self.cpT:
-			self.cp_i = 185. + 2 * 7.037 * self.T
+		if self.cpT == "GM89":
+			"Use temperature-dependent specific heat for pure ice from Grimm & McSween 1989"
+			self.cp_i = 185. + 7.037 * self.T
+		elif self.cpT == "CG10":
+			"Use temperature-dependent specific heat for pure ice from Choukroun & Grasset 2010"
+			self.cp_i = 74.11 + 7.56 * self.T
 		else:
 			self.cp_i = self.constants.cp_i
 
@@ -371,7 +375,7 @@ class HeatSolver:
 		"""Applies chosen boundary conditions during simulation run."""
 		# apply chosen boundary conditions at bottom of domain
 		if self.botBC == True:
-			self.T[-1, 1:-1] = self.Tbot
+			self.T[-1, 1:-1] = self.TbotBC[1:-1]
 
 		elif self.botBC == 'Flux':
 			T_bot_out = self.Tsurf * (self.Tbot / self.Tsurf) ** ((self.Lz + self.dz) / self.Lz)
@@ -400,7 +404,7 @@ class HeatSolver:
 
 		# apply chosen boundary conditions at top of domain
 		if self.topBC == True:
-			self.T[0, 1:-1] = self.Tsurf
+			self.T[0, 1:-1] = self.TtopBC[1:-1]
 
 		elif self.topBC == 'Flux':
 			T_top_out = self.Tsurf * (self.Tbot / self.Tsurf) ** (-self.dz / self.Lz)
@@ -569,7 +573,7 @@ class HeatSolver:
 			T_last, phi_last = self.T.copy(), self.phi.copy()
 			k_last, rhoc_last = self.k.copy(), self.rhoc.copy()
 			iter_k = 0
-			while (TErr > self.Ttol or phiErr > self.phitol):
+			while (TErr > self.Ttol and phiErr > self.phitol):
 
 				Tx, Tz = self.get_gradients(T_last)
 				self.update_liquid_fraction(phi_last=phi_last)
@@ -585,7 +589,7 @@ class HeatSolver:
 				phiErr = (abs(self.phi[1:-1, 1:-1] - phi_last[1:-1, 1:-1])).max()
 
 				# kill statement when parameters won't allow solution to converge
-				if iter_k > 1000:
+				if iter_k > 2000:
 					raise Exception('solution not converging')
 
 				iter_k += 1
@@ -699,7 +703,7 @@ class HeatSolver:
 				T_last, phi_last = self.T.copy(), self.phi.copy()
 				k_last, rhoc_last = self.k.copy(), self.rhoc.copy()
 				iter_k = 0
-				while (TErr > self.Ttol or phiErr > self.phitol):
+				while (TErr > self.Ttol and phiErr > self.phitol):
 
 					Tx, Tz = self.get_gradients(T_last)
 					self.update_liquid_fraction(phi_last=phi_last)

@@ -9,15 +9,19 @@ def main(argv):
 	dir = '/tmp/'
 	# directory i use on the GATech PACE cluster
 	outputdirectory = '/nv/hp5/cchivers3/scratch/'
+	outlist = ['T', 'phi', 'Q']
 	Lz = 5e3
 	Lx = 6e3
 	dz = dx = 10
 	dt = 3.154e7 / 52
 	Tsurf = 110
 	Tbot = 273.15
+	Tint = Tbot
 	outputfreq = 50
 	rj = 0.25
-	shell, salty = False, False
+	ac = 567.
+	tidalheat = True
+	shell, salty, in_situ = False, False, False
 	composition, concentration = 0, 0
 	names = ''
 	cpT = False
@@ -68,7 +72,7 @@ def main(argv):
 		                            'radius=', 'composition=', 'concentration=', 'OF=', 'salt=', 'shell=',
 		                            'rejectioncutoff=', 'names=', 'in-situ-melt=', 'cpT=', 'geometry=',
 		                            'Ttol=', 'phitol=', 'Stol=', 'x-symm=', 'T-match=', 'topBC=', 'botBC=', 'sidesBC=',
-		                            'dL='])
+		                            'dL=', 'kconst=', 'tidalheat=', 'Tint='])
 	except getopt.GetoptError:
 		print(optstr)
 		sys.exit(2)
@@ -77,6 +81,12 @@ def main(argv):
 		if opt == '-h':
 			print(optstr)
 			sys.exit()
+		elif opt in ('--Tint', '--Tint='):
+			Tint = float(arg)
+		elif opt in ('--kconst', '--kconst='):
+			ac = float(arg)
+		elif opt in ('--tidalheat', '--tidalheat='):
+			tidalheat = bool(int(arg))
 		elif opt in ('--Lz', '--Lz='):
 			Lz = float(arg)
 		elif opt in ('--Lx', '--Lx='):
@@ -92,7 +102,7 @@ def main(argv):
 		elif opt in ('--Tbot', '--Tbot='):
 			Tbot = float(arg)
 		elif opt in ('--profile', '--profile='):
-			profile = arg
+			profile = str(arg)
 		elif opt in ('--depth', '--depth='):
 			depth = float(arg)
 		elif opt in ('--thick', '--thick='):
@@ -111,7 +121,7 @@ def main(argv):
 			rj = float(arg)
 		elif opt in ('--shell', '--shell='):
 			shell = True
-		elif opt in ('--in-situ-melt', '--in-situ-melt='):
+		elif opt in ('--in-situ-melt', '--in-situ-melt=', '--in-situ', '--in-situ='):
 			in_situ = True
 		elif opt in ('--names', '--names='):
 			names = arg
@@ -128,7 +138,7 @@ def main(argv):
 		elif opt in ('--x-symm=', '--x-symm'):
 			X_symmetry = bool(arg)
 		elif opt in ('--T-match=', '--T-match'):
-			T_match = bool(arg)
+			T_match = bool(int(arg))
 		elif opt in ('--topBC=', '--topBC'):
 			topBC = arg
 		elif opt in ('--botBC=', '--botBC'):
@@ -143,10 +153,11 @@ def main(argv):
 
 	model = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dz, cpT=cpT, use_X_symmetry=X_symmetry)
 	model.init_T(Tsurf=Tsurf, Tbot=Tbot)
-	model.init_intrusion(Tbot, depth, thickness, radius, geometry=geometry)
+	model.init_intrusion(Tint, depth, thickness, radius, geometry=geometry)
 	if salty:
 		model.init_salinity(concentration=concentration, composition=composition, rejection_cutoff=rj, shell=shell,
-		                    T_match=T_match)
+		                    T_match=T_match, in_situ=in_situ)
+		outlist.append('S')
 	if sidesBC == 'RFlux':
 		model.set_boundaryconditions(sides=sidesBC, top=topBC, bottom=botBC, dL=dL)
 	else:
@@ -157,14 +168,15 @@ def main(argv):
 		print("--changing dt to meet max value\n  old dt = {}s \n  new dt = {}s".format(dt, 0.1 * dtmax))
 		dt = 0.1 * dtmax
 
-	model.outputs.choose(model, all=True, output_frequency=int(outputfreq * 3.154e7 / dt))
+	model.outputs.choose(model, output_list=outlist, output_frequency=int(outputfreq * 3.154e7 / dt))
 	model.outputs.tmp_data_directory = cwd + dir
 	model.outputs.tmp_data_file_name = '{}_{}_{}_{}'.format(model.outputs.tmp_data_file_name, names, thickness, depth)
 
 	print(model.outputs.tmp_data_file_name)
-	model.tidalheat = 1
+	model.tidalheat = tidalheat
 	model.freezestop = 1
 	model.Ttol, model.phitol, model.Stol = Ttol, phitol, Stol
+	model.constants.ac = ac
 
 	model.solve_heat(nt=5000000000000000000000000000, dt=dt)
 	print('  solved in {} s'.format(model.run_time))
