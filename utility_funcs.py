@@ -101,25 +101,42 @@ def directory_spider(input_dir, path_pattern="", file_pattern="", maxResults=500
 def untar_file(tarfilename, outdir, which_file='_'):
 	import tarfile
 	try:
-		print('opening', tarfilename)
+		print('Opening file:', tarfilename)
 		t = tarfile.open(tarfilename, 'r')
-		print(tarfilename, 'opened..')
+		print('... File opened')
 	except IOError as e:
 		print(e)
 	else:
 		if which_file == '_':
-			print('extracting all files to', outdir)
+			print('Extracting all files to', outdir)
 			t.extractall(outdir)
-			print('finished extracting')
+			print('Finished extracting')
 			filelist = [member.name for member in t.getmembers()]
 		else:
-			print('extracting files with', which_file, 'to', outdir)
-			extract_this = [member for member in t.getmembers() if which_file in member.name]
-			print(' ... extracting', extract_this[0])
-			t.extractall(outdir, members=extract_this)
-			if type(extract_this) is list:
-				filelist = extract_this[0].name
-			elif type(extract_this) is tarfile.TarInfo:
-				filelist = extract_this.name
+			if 'md' in which_file:
+				print('Matching model file to results file in zip')
+				idx = which_file.find('runID')
+				NID = which_file[idx:idx + 9]
+				for dirpath, dirname, filename in os.walk(outdir + '/results/'):
+					filelist = [item for item in filename if NID in item]
+					if len(filelist) > 0:
+						print('File already extracted:\n\t', filelist)
+						return filelist[0]
+				extract_this = [member for member in t.getmembers() if NID in member.name]
+				print('Extracting', extract_this, 'to', outdir)
+				t.extractall(outdir, members=extract_this)
+				if type(extract_this) is list:
+					filelist = extract_this[0].name
+				elif type(extract_this) is tarfile.TarInfo:
+					filelist = extract_this.name
+			else:
+				print('Extracting files with', which_file, 'to', outdir)
+				extract_this = [member for member in t.getmembers() if which_file in member.name]
+				print(' ... Extracting', extract_this)
+				t.extractall(outdir, members=extract_this)
+				if type(extract_this) is list:
+					filelist = extract_this[0].name
+				elif type(extract_this) is tarfile.TarInfo:
+					filelist = extract_this.name
 	t.close()
 	return filelist

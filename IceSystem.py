@@ -1,10 +1,19 @@
 # Author: Chase Chivers
-# Last updated: 9/10/19
-#  Object build for 2d heat diffusion problem applied to liquid water in the ice shell of Europa
+# Last updated: 10/28/19
+# Modular build for 2d heat diffusion problem
+#   applied to liquid water in the ice shell of Europa
 
 import numpy as np
 from scipy import optimize
 from HeatSolver import HeatSolver
+
+
+# Comment out for pace runs
+# import matplotlib.pyplot as plt
+# import matplotlib.colors as colors
+# import seaborn as sns
+# sns.set(palette='colorblind', color_codes=1, context='notebook', style='ticks')
+
 
 class IceSystem(HeatSolver):
 	"""
@@ -80,18 +89,18 @@ class IceSystem(HeatSolver):
 		cp_w = 4.19e3  # J/kgK, pure water specific heat
 		ki = 2.3  # W/mK, pure ice thermal conductivity
 		kw = 0.56  # W/mK, pure water thermal conductivity
-		ac = 567  # W/m, ice thermal conductivity constant, ki = ac/T
+		ac = 567  # W/m, ice thermal conductivity constant, ki = ac/T (Klinger, 1980)
 		Tm = 273.15  # K, pure ice melting temperature at 1 atm
 		Lf = 333.6e3  # J/kg, latent heat of fusion of ice
-		expans = 1.6e-4  # 1/K, thermal expansivity
+		expans = 1.6e-4  # 1/K, thermal expansivity of ice
 
 		rho_s = 0.  # kg/m3, salt density, assigned only when salinity is used
 
 		# Radiation properties
 		emiss = 0.97  # pure ice emissivity
-		stfblt = 5.67e-8  # W/m2K4 stefan-boltzman constant
+		stfblt = 5.67e-8  # W/m2K4 Stefan-Boltzman constant
 
-		# Constants for viscosity dependent tida lheating
+		# Constants for viscosity dependent tidal heating
 		#   from Mitri & Showman (2005)
 		act_nrg = 26.  # activation energy for diffusive regime
 		Qs = 60e3  # J/mol, activation energy of ice (Goldsby & Kohlstadt, 2001)
@@ -118,6 +127,7 @@ class IceSystem(HeatSolver):
 		else:
 			self.k_initial = self.phi_initial * self.constants.kw + (1 - self.phi_initial) * self.constants.ki
 
+
 	def init_volume_averages(self):
 		"""
 		Initialize volume averaged values over the domain. In practice, this is automatically called by any future
@@ -128,9 +138,12 @@ class IceSystem(HeatSolver):
 		else:
 			self.k = (1 - self.phi) * self.constants.ac / self.T + self.phi * self.constants.kw
 
-		if self.cpT is True:
-			# what comes out given this function and a time derivative of rhoc
-			self.cp_i = 185. + 2 * 7.037 * self.T
+		if self.cpT == "GM89":
+			"Use temperature-dependent specific heat for pure ice from Grimm & McSween 1989"
+			self.cp_i = 185. + 7.037 * self.T
+		elif self.cpT == "CG10":
+			"Use temperature-dependent specific heat for pure ice from Choukroun & Grasset 2010"
+			self.cp_i = 74.11 + 7.56 * self.T
 		else:
 			self.cp_i = self.constants.cp_i
 
@@ -215,6 +228,8 @@ class IceSystem(HeatSolver):
 
 		# save boundaries for dirichlet or other
 		# left and right boundaries
+		self.TtopBC = self.T[0, :]
+		self.TbotBC = self.T[-1, :]
 		self.Tedge = self.T[:, 0] = self.T[:, -1]
 		self.Tsurf = Tsurf
 		self.Tbot = Tbot
@@ -437,8 +452,6 @@ class IceSystem(HeatSolver):
 			self.S += self.phi * concentration
 
 		if shell:
-			# automatically set the bottom temperature to Tm for salinity at the bottom
-			T_match = True
 			# method for a salinity/depth profile via Buffo et al. 2019
 			s_depth = lambda z, a, b, c: a + b / (c - z)
 			self.S = s_depth(self.Z, *self.depth_consts[composition][concentration])
@@ -456,21 +469,28 @@ class IceSystem(HeatSolver):
 						raise Exception('problem with salt redistribution')
 				except AttributeError:
 					pass
+				print('-- New intrusion salinity: {} ppt'.format(self.S[self.geom[0][0], self.geom[1][0]]))
 
 			# update temperature profile to reflect bottom boundary condition
 			if T_match:
 				self.Tbot = self.Tm_func(s_depth(self.Lz, *self.depth_consts[composition][concentration]),
-				                         *self.Tm_consts[composition])
-				print('--Adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf, self.Tbot))
+				                         *self.Tm_consts[composition]) - 0.5
+				print('-- Adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf, self.Tbot))
 				self.init_T(Tsurf=self.Tsurf, Tbot=self.Tbot)
+			else:
+				pass
+
 		else:
-			# homogenous brine, pure ice shell
+			# homogeneous brine, pure ice shell
 			self.S = self.phi * concentration
+
 			if T_match:
 				self.Tbot = self.Tm_func(concentration, *self.Tm_consts[composition])
 				print('--Pure shell; adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf,
 				                                                                                  self.Tbot))
 				self.init_T(Tsurf=self.Tsurf, Tbot=self.Tbot)
+			else:
+				pass
 
 		# update initial melting temperature
 		self.Tm = self.Tm_func(self.S, *self.Tm_consts[composition])
@@ -480,6 +500,7 @@ class IceSystem(HeatSolver):
 		self.total_salt = [self.S.sum()]
 		# begin tracking amount of salt removed from system
 		self.removed_salt = []
+
 		# update temperature of liquid to reflect salinity
 		try:
 			self.T_int = self.Tm_func(self.S[self.geom], *self.Tm_consts[composition])[0]
@@ -533,10 +554,7 @@ class IceSystem(HeatSolver):
 				return m * S + b
 
 		else:  # recursively call this function to fill an array of the same length as input array
-			ans = np.zeros(len(dT))
-			for i in range(len(dT)):
-				ans[i] = self.entrain_salt(dT[i], S[i], composition)
-			return ans
+			return np.array([self.entrain_salt(t, s, composition) for t, s in zip(dT, S)])
 
 		'''
 				# An attempt at utilizing the vectorizing of salinity, but doesn't seem faster and may be slower
