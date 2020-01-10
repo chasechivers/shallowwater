@@ -422,34 +422,15 @@ class HeatSolver:
 			self.T[0, 1:-1] = T_last[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
 
 		elif self.topBC == 'Radiative':
-			c = self.dt / (2 * rhoc_last[0, 1:-1])
-			# save flux into surface from equilibrium at first time step
-			if self.std_set == 0:
-				self.Std_Flux_in = (self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0, 1:-1])
-				self.std_set = 1
-			# calculate flux from cells beneath the surface
-			Flux_in = (self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0,
-			                                                                   1:-1])  # (k_last[0, 1:-1] + k_last[1, 1:-1]) * (T_last[1, 1:-1] - T_last[0, 1:-1])
-			Ttopz = np.zeros(len(Flux_in))
-			# find which cells have heat flux into them
-			fluxed = np.where(abs(Flux_in - self.Std_Flux_in) > 1e-4)[0]
-			# if there is any flux beyond the standard flux saved at first time step
-			if len(fluxed) > 0:
-				# calculate radiative flux out of surface
-				rad = self.dz * self.constants.stfblt * self.constants.emiss * (
-							T_last[0, fluxed] ** 4 - self.Tsurf ** 4)
-				# calculate flux in and out of surface
-				Ttopz[fluxed] = self.dt * Flux_in[fluxed] / (2 * rhoc_last[0, fluxed] * self.dz ** 2) \
-				                - self.dt * rad / (rhoc_last[0, fluxed] * self.dz ** 2)
-
-			Ttopx = c / self.dx ** 2 * ((k_last[0, 1:-1] + k_last[0, 2:]) * (T_last[0, 2:] - T_last[0, 1:-1]) \
+			c = self.dt / (2 * rhoc_last[0, :])
+			rad = self.dz * self.constants.stfblt * self.constants.emiss * (T_last[0,:]**4 - self.Tsurf**4)
+			Ttopz = c/self.dz**2 * ((k_last[0,:] + k_last[1,:])*(T_last[1,:] - T_last[0,:]) \
+			                        - (self.k_initial[0,:]+self.k_initial[1,:])*(self.T_initial[1,:]-self.Tsurf))
+			Ttopx = 1 / self.dx ** 2 * ((k_last[0, 1:-1] + k_last[0, 2:]) * (T_last[0, 2:] - T_last[0, 1:-1]) \
 			                            - (k_last[0, 1:-1] + k_last[0, :-2]) * (T_last[0, 1:-1] - T_last[0, :-2]))
 
-			self.T[0, 1:-1] = T_last[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
-
-		# else:
-		#	self.T[0, 1:-1] = self.Tsurf
-
+			self.T[0, :] = T_last[0, :] + Ttopz - rad * c/self.dz**2
+			self.T[0,1:-1] += (Ttopx + self.Q[0, :] * 2)*self.dt/(2*rhoc_last[0, 1:-1])
 		# apply chosen boundary conditions at sides of domain
 		if self.sidesBC == True:
 			self.T[:, 0] = self.Tedge.copy()
