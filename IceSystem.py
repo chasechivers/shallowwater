@@ -457,7 +457,7 @@ class IceSystem(HeatSolver):
 			self.S = s_depth(self.Z, *self.depth_consts[composition][concentration])
 
 			if in_situ is False:  # for water emplaced in a salty shell
-				self.S += self.phi * concentration
+				self.S[self.geom] = concentration
 			else:  # must redistribute the salt evenly to simulate real in-situ melting
 				print('Redistributing salt in intrusion')
 				try:
