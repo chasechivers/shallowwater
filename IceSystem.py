@@ -474,7 +474,7 @@ class IceSystem(HeatSolver):
 			# update temperature profile to reflect bottom boundary condition
 			if T_match:
 				self.Tbot = self.Tm_func(s_depth(self.Lz, *self.depth_consts[composition][concentration]),
-				                         *self.Tm_consts[composition]) - 0.5
+				                         *self.Tm_consts[composition])
 				print('-- Adjusting temperature profile: Tsurf = {}, Tbot = {}'.format(self.Tsurf, self.Tbot))
 				self.init_T(Tsurf=self.Tsurf, Tbot=self.Tbot)
 			else:
