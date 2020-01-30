@@ -442,7 +442,7 @@ class HeatSolver:
 			self.T[0, 1:-1] += (Ttopx + self.Q[0, :] * 2) * self.dt / (2 * rhoc_last[0, 1:-1])
 		# else:
 		#	self.T[0, 1:-1] = self.Tsurf
-
+    
 		# apply chosen boundary conditions at sides of domain
 		if self.sidesBC == True:
 			self.T[:, 0] = self.Tedge.copy()
