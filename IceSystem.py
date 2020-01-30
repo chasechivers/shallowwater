@@ -382,8 +382,8 @@ class IceSystem(HeatSolver):
 		                       'NaCl': {0: [0., 0., 0., 0.],
 		                                10: [7.662, -4.936, 2.106, 24.8],
 		                                34: [11.1, -4.242, 1.91, 22.55],
-		                                100: [22.19, -11.98, 1.942, 21.91],  # copied from MgSO4
-		                                260: [30.998, -11.5209, 2.0136, 21.1628]}  # copied from MgSO4
+		                                100: [0., 0., 0., 0.],
+		                                260: [0., 0., 0., 0.]}
 		                       }
 
 		# dict structure {composition: {concentration: [a,b]}}
@@ -394,8 +394,8 @@ class IceSystem(HeatSolver):
 		                      'NaCl': {0: [0., 0.],
 		                               10: [0.6442, 0.2279],
 		                               34: [1.9231, 0.33668],
-		                               100: [5.4145, 0.69992],  # copied from MgSO4
-		                               260: [14.737, 0.62319]}  # copied from MgSO4
+		                               100: [0., 0.],
+		                               260: [0., 0.]}
 		                      }
 
 		# dict structure {composition: {concentration: [a,b,c]}}
@@ -404,8 +404,8 @@ class IceSystem(HeatSolver):
 		                               282: [14.681, -117.429, -5.4962]},
 		                     'NaCl': {10: [0., 0., 0.],
 		                              34: [1.8523, -72.4049, -10.6679],
-		                              100: [5.38, -135.096, -8.2515],  # copied from MgSO4
-		                              260: [14.681, -117.429, -5.4962]}  # copied from MgSO4
+		                              100: [0., 0., 0.],
+		                              260: [0., 0., 0.]}
 		                     }
 
 		# create dictionary of root to switch between shallow and linear fits
@@ -514,7 +514,7 @@ class IceSystem(HeatSolver):
 	def entrain_salt(self, dT, S, composition):
 		"""
 		Calculate the amount of salt entrained in newly frozen ice that is dependent on the thermal gradient across
-		the ice (Buffo et al., 2019).
+		the ice (Buffo et al., in review).
 		Parameters:
 			dT : float, array
 				temperature gradient across cell, or array of temperature gradients
@@ -530,9 +530,6 @@ class IceSystem(HeatSolver):
 		Usage:
 			See HeatSolver.update_salinity() function.
 		"""
-		# if composition != 'MgSO4':
-		# raise Exception('Run tests on other compositions')
-
 		if isinstance(dT, (int, float)):  # if dT (and therefore S) is a single value
 			if S in self.shallow_consts[composition]:
 				# determine whether to use linear or shallow fit
@@ -556,45 +553,3 @@ class IceSystem(HeatSolver):
 
 		else:  # recursively call this function to fill an array of the same length as input array
 			return np.array([self.entrain_salt(t, s, composition) for t, s in zip(dT, S)])
-
-		'''
-				# An attempt at utilizing the vectorizing of salinity, but doesn't seem faster and may be slower
-				S_ent = np.zeros(len(dT))
-				for concentration in self.shallow_consts[composition]:
-					locs = np.where(S == concentration)
-					if len(locs[0]) > 0:
-						_dT_ = dT[locs]
-						print(np.shape(_dT_))
-						switch = self.linear_shallow_roots[composition][concentration]
-						print(np.shape(S_ent[_dT_ > switch]))
-						S_ent[_dT_ > switch] = self.shallow_fit(_dT_[_dT_ > switch], *self.shallow_consts[composition][concentration])
-						print(np.shape(S_ent[_dT_ < switch]))
-						S_ent[_dT_ < switch] = self.linear_fit(_dT_[_dT_ < switch], *self.linear_consts[composition][concentration])
-					del locs
-
-				z0 = np.where(S_ent == 0)[0]
-				if len(z0 != 0):
-					for i in range(len(z0)):
-			
-						c_min = self.concentrations[S[z0[i]] > self.concentrations].max()
-						c_max = self.concentrations[S[z0[i]] < self.concentrations].min()
-
-						switch_max = self.linear_shallow_roots[composition][c_max]
-						switch_min = self.linear_shallow_roots[composition][c_min]
-
-						if dT[z0[i]] > switch_min:
-							sent_min = self.shallow_fit(dT[z0[i]], *self.shallow_consts[composition][c_min])
-						elif dT[z0[i]] < switch_min:
-							sent_min = self.linear_fit(dT[z0[i]], *self.linear_consts[composition][c_min])
-						if dT[z0[i]] > switch_max:
-							sent_max = self.shallow_fit(dT[z0[i]], *self.shallow_consts[composition][c_max])
-						elif dT[z0[i]] < switch_max:
-							sent_max = self.linear_fit(dT[z0[i]], *self.linear_consts[composition][c_max])
-
-						m, b = np.polyfit([c_max, c_min], [sent_max, sent_min], 1)
-
-						S_ent[z0[i]] = m * S[z0[i]] + b
-
-				return S_ent
-
-				'''

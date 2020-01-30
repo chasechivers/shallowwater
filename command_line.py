@@ -168,9 +168,9 @@ def main(argv):
 		print("--changing dt to meet max value\n  old dt = {}s \n  new dt = {}s".format(dt, 0.1 * dtmax))
 		dt = 0.1 * dtmax
 
-	model.outputs.choose(model, output_list=outlist, output_frequency=int(outputfreq * 3.154e7 / dt))
-	model.outputs.tmp_data_directory = cwd + dir
-	model.outputs.tmp_data_file_name = '{}_{}_{}_{}'.format(model.outputs.tmp_data_file_name, names, thickness, depth)
+	filename = '{}_{}_{}_{}'.format(model.outputs.tmp_data_file_name, names, thickness, depth)
+	model.outputs.choose(model, file_path=cwd + dir, file_name=filename, output_list=outlist,
+	                     output_frequency=int(outputfreq * 3.154e7 / dt))
 
 	print(model.outputs.tmp_data_file_name)
 	model.tidalheat = tidalheat
