@@ -112,7 +112,7 @@ class IceSystem(HeatSolver):
 
 		# Mechanical properties of ice
 		G = 3.52e9  # Pa, shear modulus/rigidity (Moore & Schubert, 2000)
-		E = 1e6  # Pa, Young's Modulus
+		E = 2.66 * G  # Pa, Young's Modulus
 
 	def save_initials(self):
 		""" Save initial values to compare with simulation results. """
@@ -134,9 +134,9 @@ class IceSystem(HeatSolver):
 		function that are changing physical parameters such as liquid fraction, salinity or temperature.
 		"""
 		if self.kT:
-			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
+			self.k = (1 - self.phi) * (self.constants.ac / self.T) + self.phi * self.constants.kw
 		else:
-			self.k = (1 - self.phi) * self.constants.ac / self.T + self.phi * self.constants.kw
+			self.k = (1 - self.phi) * self.constants.ki + self.phi * self.constants.kw
 
 		if self.cpT == "GM89":
 			"Use temperature-dependent specific heat for pure ice from Grimm & McSween 1989"
@@ -382,8 +382,8 @@ class IceSystem(HeatSolver):
 		                       'NaCl': {0: [0., 0., 0., 0.],
 		                                10: [7.662, -4.936, 2.106, 24.8],
 		                                34: [11.1, -4.242, 1.91, 22.55],
-		                                100: [0., 0., 0., 0.],
-		                                260: [0., 0., 0., 0.]}
+		                                100: [22.19, -11.98, 1.942, 21.91],  # copied from MgSO4
+		                                260: [30.998, -11.5209, 2.0136, 21.1628]}  # copied from MgSO4
 		                       }
 
 		# dict structure {composition: {concentration: [a,b]}}
@@ -394,8 +394,8 @@ class IceSystem(HeatSolver):
 		                      'NaCl': {0: [0., 0.],
 		                               10: [0.6442, 0.2279],
 		                               34: [1.9231, 0.33668],
-		                               100: [0., 0.],
-		                               260: [0., 0.]}
+		                               100: [5.4145, 0.69992],  # copied from MgSO4
+		                               260: [14.737, 0.62319]}  # copied from MgSO4
 		                      }
 
 		# dict structure {composition: {concentration: [a,b,c]}}
@@ -404,8 +404,8 @@ class IceSystem(HeatSolver):
 		                               282: [14.681, -117.429, -5.4962]},
 		                     'NaCl': {10: [0., 0., 0.],
 		                              34: [1.8523, -72.4049, -10.6679],
-		                              100: [0., 0., 0.],
-		                              260: [0., 0., 0.]}
+		                              100: [5.38, -135.096, -8.2515],  # copied from MgSO4
+		                              260: [14.681, -117.429, -5.4962]}  # copied from MgSO4
 		                     }
 
 		# create dictionary of root to switch between shallow and linear fits
@@ -499,7 +499,8 @@ class IceSystem(HeatSolver):
 		# begin tracking mass
 		self.total_salt = [self.S.sum()]
 		# begin tracking amount of salt removed from system
-		self.removed_salt = []
+		self.removed_salt, self.mass_removed, self.ppt_removed = [0], [0], [0]
+		self.wat_vol = [self.geom[1].shape[0]]
 
 		# update temperature of liquid to reflect salinity
 		try:
@@ -529,8 +530,8 @@ class IceSystem(HeatSolver):
 		Usage:
 			See HeatSolver.update_salinity() function.
 		"""
-		if composition != 'MgSO4':
-			raise Exception('Run tests on other compositions')
+		# if composition != 'MgSO4':
+		# raise Exception('Run tests on other compositions')
 
 		if isinstance(dT, (int, float)):  # if dT (and therefore S) is a single value
 			if S in self.shallow_consts[composition]:
