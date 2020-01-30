@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 10/28/19
+# Last updated: 1/10/20
 
 import numpy as np
 import time as _timer_
@@ -36,17 +36,19 @@ class HeatSolver:
 	Stol = 1  # salinity tolerance
 	latentheat = 1  # choose enthalpy method to use
 	freezestop = 0  # stop simulation upon total solidification of intrusion
+	model_time = 0
 
 	class outputs:
 		"""Class structure to help define and calculate desired outputs of a simulation."""
+
 		def __init__(self):
 			self.outputs.tmp_data_directory = ''
 			self.outputs.tmp_data_file_name = ''
 			self.outputs.transient_results = dict()
 			self.outputs.output_frequency = 0
 
-		def choose(self, all=False, T=False, phi=False, k=False, S=False, Q=False, h=False, r=False,
-		           freeze_fronts=False, percent_frozen=False, output_frequency=1000, output_list=[]):
+		def choose(self, file_path='./tmp/', file_name='', all=False, T=False, phi=False, k=False, S=False, Q=False,
+		           h=False, r=False, freeze_fronts=False, percent_frozen=False, output_frequency=1000, output_list=[]):
 			"""
 			Choose which outputs to track with time. Each variable is updated at the chosen output frequency and is
 			returned in the dictionary object outputs.transient_results.
@@ -89,9 +91,9 @@ class HeatSolver:
 
 			self.outputs.transient_results = {key: [] for key in to_output if to_output[key] is True}
 			self.outputs.outputs = self.outputs.transient_results.copy()
-
+			self.outputs.tmp_data_directory = file_path
+			self.outputs.tmp_data_file_name = file_name
 			self.outputs.output_frequency = output_frequency
-			self.outputs.tmp_data_directory = './tmp/'
 			self.outputs.tmp_data_file_name = 'tmp_data_runID' + ''.join(random.choice(string.digits) for _ in range(4))
 
 		def calculate_outputs(self, n):
@@ -243,7 +245,10 @@ class HeatSolver:
 			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
 			vol = water[1].shape[0]  # calculate "volume" of water
 			# rejected_salt = 0  # initialize amount of salt rejected, ppt
+			self.wat_vol.append(vol if vol > 0 else np.where(self.phi > 0)[1].shape[0])
 			self.removed_salt.append(0)  # start catalogue of salt removed from system
+			self.mass_removed.append(0)
+			self.ppt_removed.append(0)
 
 			if len(z_ni) > 0 and vol != 0:  # iterate over cells where ice has just formed
 				Sn = self.S.copy()
@@ -291,6 +296,9 @@ class HeatSolver:
 				'''
 				# remove salt from system if liquid is above the saturation point
 				self.removed_salt[-1] += (self.S[self.S >= self.saturation_point] - self.saturation_point).sum()
+				self.mass_removed[-1] += vol * (self.S[self.geom].max() * self.C_rho + self.constants.rho_w) * \
+				                         self.removed_salt[-1] / vol / 1000
+				self.ppt_removed[-1] += self.removed_salt[-1] / vol
 
 				# ensure liquid hits only the saturation concentration
 				self.S[self.S > self.saturation_point] = self.saturation_point
@@ -422,31 +430,16 @@ class HeatSolver:
 			self.T[0, 1:-1] = T_last[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
 
 		elif self.topBC == 'Radiative':
-			c = self.dt / (2 * rhoc_last[0, 1:-1])
-			# save flux into surface from equilibrium at first time step
-			if self.std_set == 0:
-				self.Std_Flux_in = (self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0, 1:-1])
-				self.std_set = 1
-			# calculate flux from cells beneath the surface
-			Flux_in = (self.k[0, 1:-1] + self.k[1, 1:-1]) * (self.T[1, 1:-1] - self.T[0,
-			                                                                   1:-1])  # (k_last[0, 1:-1] + k_last[1, 1:-1]) * (T_last[1, 1:-1] - T_last[0, 1:-1])
-			Ttopz = np.zeros(len(Flux_in))
-			# find which cells have heat flux into them
-			fluxed = np.where(abs(Flux_in - self.Std_Flux_in) > 1e-4)[0]
-			# if there is any flux beyond the standard flux saved at first time step
-			if len(fluxed) > 0:
-				# calculate radiative flux out of surface
-				rad = self.dz * self.constants.stfblt * self.constants.emiss * (
-							T_last[0, fluxed] ** 4 - self.Tsurf ** 4)
-				# calculate flux in and out of surface
-				Ttopz[fluxed] = self.dt * Flux_in[fluxed] / (2 * rhoc_last[0, fluxed] * self.dz ** 2) \
-				                - self.dt * rad / (rhoc_last[0, fluxed] * self.dz ** 2)
-
-			Ttopx = c / self.dx ** 2 * ((k_last[0, 1:-1] + k_last[0, 2:]) * (T_last[0, 2:] - T_last[0, 1:-1]) \
+			c = self.dt / (2 * rhoc_last[0, :])
+			rad = self.dz * self.constants.stfblt * self.constants.emiss * (T_last[0, :] ** 4 - self.Tsurf ** 4)
+			Ttopz = c / self.dz ** 2 * ((k_last[0, :] + k_last[1, :]) * (T_last[1, :] - T_last[0, :]) \
+			                            - (self.k_initial[0, :] + self.k_initial[1, :]) * (
+						                            self.T_initial[1, :] - self.Tsurf))
+			Ttopx = 1 / self.dx ** 2 * ((k_last[0, 1:-1] + k_last[0, 2:]) * (T_last[0, 2:] - T_last[0, 1:-1]) \
 			                            - (k_last[0, 1:-1] + k_last[0, :-2]) * (T_last[0, 1:-1] - T_last[0, :-2]))
 
-			self.T[0, 1:-1] = T_last[0, 1:-1] + Ttopx + Ttopz + self.Q[0, :] * 2 * c
-
+			self.T[0, :] = T_last[0, :] + Ttopz - rad * c / self.dz ** 2
+			self.T[0, 1:-1] += (Ttopx + self.Q[0, :] * 2) * self.dt / (2 * rhoc_last[0, 1:-1])
 		# else:
 		#	self.T[0, 1:-1] = self.Tsurf
 
@@ -465,11 +458,13 @@ class HeatSolver:
 
 			# right side of domain
 			c = self.dt / (2 * rhoc_last[1:-1, -1])
-			TRX = c * ((k_last[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * (
-						self.Tedge[1:-1] - T_last[1:-1, -1]) / self.dx \
+			TRX = c * ((k_last[1:-1, -1] + self.constants.ac / self.Tedge[1:-1]) * \
+			           (self.Tedge[1:-1] - T_last[1:-1, -1]) / self.dx \
 			           - (k_last[1:-1, -1] + k_last[1:-1, -2]) * (T_last[1:-1, -1] - T_last[1:-1, -2]) / self.dL)
+
 			TRZ = c * ((k_last[1:-1, -1] + k_last[2:, -1]) * (T_last[2:, -1] - T_last[1:-1, -1]) \
 			           - (k_last[1:-1, -1] + k_last[:-2, -1]) * (T_last[1:-1, -1] - T_last[:-2, -1])) / self.dz ** 2
+
 			self.T[1:-1, -1] = T_last[1:-1, -1] + TRX + TRZ + self.Q[:, -1] * 2 * c
 
 	def get_gradients(self, T_last):
@@ -563,7 +558,6 @@ class HeatSolver:
 				model.solve_heat(nt=1000, dt=300)
 		"""
 		self.dt = dt
-		self.model_time = dt
 		start_time = _timer_.clock()
 		self.num_iter = []
 		if print_opts: self.print_all_options(nt)
