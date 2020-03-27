@@ -239,13 +239,12 @@ class HeatSolver:
 		Parameterization of salt advection and diffusion in the intrusion. See Chivers et al., 201X for full
 		description of parameterization.
 		"""
-
 		if self.issalt:
 			z_ni, x_ni = np.where((phi_last > 0) & (self.phi == 0))  # find where ice has just formed
 			water = np.where(self.phi >= self.rejection_cutoff)  # find cells that can accept rejected salts
 			vol = water[1].shape[0]  # calculate "volume" of water
 			# rejected_salt = 0  # initialize amount of salt rejected, ppt
-			self.wat_vol.append(vol if vol > 0 else np.where(self.phi > 0)[1].shape[0])
+			self.wat_vol.append(self.phi.sum())
 			self.removed_salt.append(0)  # start catalogue of salt removed from system
 			self.mass_removed.append(0)
 			self.ppt_removed.append(0)
@@ -255,8 +254,12 @@ class HeatSolver:
 				for i in range(len(z_ni)):
 					# save starting salinity in cell
 					S_old = self.S[z_ni[i], x_ni[i]]
+
 					# calculate thermal gradients across each cell
-					dTx = abs(self.T[z_ni[i], x_ni[i] - 1] - self.T[z_ni[i], x_ni[i] + 1]) / (2 * self.dx)
+					if self.symmetric and x_ni[i] in [0, self.nx - 1]:
+						dTx = 0
+					else:
+						dTx = abs(self.T[z_ni[i], x_ni[i] - 1] - self.T[z_ni[i], x_ni[i] + 1]) / (2 * self.dx)
 					dTz = (self.T[z_ni[i] - 1, x_ni[i]] - self.T[z_ni[i] + 1, x_ni[i]]) / (2 * self.dz)
 
 					# brine drainage parameterization:
@@ -268,7 +271,9 @@ class HeatSolver:
 					elif dTz < 0:
 						# dT = np.hypot(dTx, dTz)  # gradient across the diagonal of the cell
 						# dT = max(abs(dTx), abs(dTz))  # maximum value
-						dT = (dTx + abs(dTz)) / 2  # average over both
+						# dT = np.sqrt(dTx*abs(dTz))  # geometric mean
+						# dT = 2/(1/dTx + 1/abs(dTz))  # harmonic mean
+						dT = (dTx + abs(dTz)) / 2.  # arithmetic mean
 						# salt entrained in newly formed ice determined by Buffo et al., 2019 results. (See
 						# IceSystem.entrain_salt() function)
 						self.S[z_ni[i], x_ni[i]] = self.entrain_salt(dT, S_old, self.composition)

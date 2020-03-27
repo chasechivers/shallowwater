@@ -27,9 +27,6 @@ def file_namer(model, outputdir, *argv):
 		defaults['composition'] = 0
 		defaults['concentration'] = 0
 		defaults['saturation_point'] = model.saturation_point
-	if model.topBC == 'Radiative':
-		defaults['std_set'] = 1
-		defaults['Std_Flux_in'] = model.Std_Flux_in
 	dict = {key: value for key, value in model.__dict__.items() if not key.startswith('__') and \
 	        not callable(key) and type(value) in [str, bool, int, float] and value != defaults[key]}
 	file_name = outputdir
