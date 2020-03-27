@@ -7,14 +7,6 @@ import numpy as np
 from scipy import optimize
 from HeatSolver import HeatSolver
 
-
-# Comment out for pace runs
-# import matplotlib.pyplot as plt
-# import matplotlib.colors as colors
-# import seaborn as sns
-# sns.set(palette='colorblind', color_codes=1, context='notebook', style='ticks')
-
-
 class IceSystem(HeatSolver):
 	"""
 	Class with methods to set up initial conditions for two-dimensional, two-phase thermal diffusion model that
@@ -57,19 +49,19 @@ class IceSystem(HeatSolver):
 		self.Lx, self.Lz = Lx, Lz
 		self.dx, self.dz = dx, dz
 		self.nx, self.nz = int(Lx / dx + 1), int(Lz / dz + 1)
-		self.Z = np.linspace(0, self.Lz, self.nz)  # z domain starts at zero, z is positive down
+		self.Z = np.array([j * dz for j in range(self.nz)], dtype=float)  # positive down
 		if use_X_symmetry:
 			self.symmetric = True
 			self.Lx = self.Lx / 2
 			self.nx = int(self.Lx / self.dx + 1)
-			self.X = np.linspace(0, self.Lx, self.nx)
+			self.X = np.array([i * dx for i in range(self.nx)], dtype=float)
 			self.X, self.Z = np.meshgrid(self.X, self.Z)  # create spatial grid
 		elif use_X_symmetry is False:
-			self.X = np.linspace(-self.Lx / 2, self.Lx / 2, self.nx)  # x domain centered on 0
-			self.X, self.Z = np.meshgrid(self.X, self.Z)  # create spatial grid
-		self.T = np.ones((self.nz, self.nx))  # initialize domain at one temperature
-		self.S = np.zeros((self.nz, self.nx))  # initialize domain with no salt
-		self.phi = np.zeros((self.nz, self.nx))  # initialize domain as ice
+			self.X = np.array([-Lx / 2 + i * dx for i in range(self.nx)], dtype=float)  # x domain centered on 0
+			self.X, self.Z = np.meshgrid(self.X, self.Z, dtype=float)  # create spatial grid
+		self.T = np.zeros((self.nz, self.nx), dtype=float)  # initialize domain at one temperature
+		self.S = np.zeros((self.nz, self.nx), dtype=float)  # initialize domain with no salt
+		self.phi = np.zeros((self.nz, self.nx), dtype=float)  # initialize domain as ice
 		self.kT, self.cpT = kT, cpT  # k(T), cp_i(T) I/O
 		self.issalt = False  # salt I/O
 
@@ -126,7 +118,6 @@ class IceSystem(HeatSolver):
 			                 self.constants.ac / self.T_initial
 		else:
 			self.k_initial = self.phi_initial * self.constants.kw + (1 - self.phi_initial) * self.constants.ki
-
 
 	def init_volume_averages(self):
 		"""
@@ -200,7 +191,7 @@ class IceSystem(HeatSolver):
 					model.init_T(Tsurf=110,Tbot=273.15,real_lz=realLz)
 		"""
 		# set melting temperature to default
-		self.Tm = self.constants.Tm * self.T.copy()
+		self.Tm = self.constants.Tm * np.ones(self.X.shape)
 
 		if isinstance(profile, str):
 			if profile == 'non-linear':
@@ -344,7 +335,6 @@ class IceSystem(HeatSolver):
 				temperature. If assuming something else, such as a slightly cooler convecting layer between the
 				brittle shell and the ocean, this can be adjusted afterward by calling init_T()
 			in_situ : bool
-				Note: shell option must be True.
 				Assumes the intrusion is from an event that melted the shell in-situ, thus have the same
 				concentration and composition as the shell at that depth.
 			T_match : bool
@@ -360,6 +350,8 @@ class IceSystem(HeatSolver):
 			melting
 				model.init_intrusion(composition='MgSO4', concentration=100., shell=True, in_situ=True)
 		"""
+		if in_situ == True:
+			shell = True
 
 		self.issalt = True  # turn on salinity for solvers
 		self.saturated = 0  # whether liquid is saturated
@@ -552,4 +544,4 @@ class IceSystem(HeatSolver):
 				return m * S + b
 
 		else:  # recursively call this function to fill an array of the same length as input array
-			return np.array([self.entrain_salt(t, s, composition) for t, s in zip(dT, S)])
+			return np.array([self.entrain_salt(t, s, composition) for t, s in zip(dT, S)], dtype=float)
