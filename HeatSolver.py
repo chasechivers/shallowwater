@@ -1,5 +1,5 @@
 # Author: Chase Chivers
-# Last updated: 1/10/20
+# Last updated: 3/18/20
 
 import numpy as np
 import time as _timer_
@@ -254,7 +254,6 @@ class HeatSolver:
 				for i in range(len(z_ni)):
 					# save starting salinity in cell
 					S_old = self.S[z_ni[i], x_ni[i]]
-
 					# calculate thermal gradients across each cell
 					if self.symmetric and x_ni[i] in [0, self.nx - 1]:
 						dTx = 0
