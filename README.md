@@ -1,5 +1,5 @@
-# sill_freeze
-Thermal evolution of fresh and saline liquid water in Europa's ice shell
+
+# Thermal evolution of fresh and saline liquid water in Europa's ice shell
 
 ## Model
 Two-dimensional, two-phase conduction problem described by the conservation of heat that uses an iterative enthalpy method (Huber et al., 2008) to account for latent heat from phase change with a temperature-dependent conductivity of ice
