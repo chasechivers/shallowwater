@@ -1,6 +1,6 @@
 # Example script
 
-from IceSystem import IceSystem
+from ShallowWater import ShallowWater as Model
 from utility_funcs import *
 
 tmp_dir = './tmp/'  # directory to store temporary data files
@@ -26,7 +26,7 @@ conc = 100  # ppt, initial concentration
 OF = 50.  # years, output frequency
 
 # initialize system
-md = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dz, use_X_symmetry=True)
+md = Model(Lx=Lx, Lz=Lz, dx=dx, dz=dz, use_X_symmetry=True)
 md.init_T(Tsurf=Tsurf, Tbot=Tbot)
 md.init_intrusion(T=Tbot, depth=h, thickness=h, radius=R)
 md.init_salinity(concentration=conc)
