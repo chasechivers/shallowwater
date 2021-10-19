@@ -6,7 +6,7 @@ import SalinityConstants
 from ThermophysicalProperties import ThermophysicalProperties
 
 
-class IceSystem(HeatSolver, ThermophysicalProperties):
+class ShallowWater(HeatSolver, ThermophysicalProperties):
 	"""Class with methods to set up initial conditions for two-dimensional, two-phase thermal diffusion model that
 	includes temperature-dependent conductivity and salinity. Includes the HeatSolver class used to solve the heat
 	equation utilizing an enthalpy method (Huber et al., 2008) to account for latent heat from phase change as well
