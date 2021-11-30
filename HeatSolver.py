@@ -231,17 +231,6 @@ class HeatSolver:
 		----------
 		None
 		"""
-		# now diffusion and expulsion ?
-		# D = 2e-9 * phi_last ** 2
-		# D[phi_last < 0.05] = 0
-		# S = self.S.copy()l
-		# dSx = self._conductivity_average(D[1:-1, 2:], D[1:-1, 1:-1]) * (S[1:-1, 2:] - S[1:-1, 1:-1]) / self.dx**2 \
-		#	- self._conductivity_average(D[1:-1, 1:-1], D[1:-1, :-2]) * (S[1:-1, 1:-1] - S[1:-1, :-2]) / self.dz**2
-		# dSz = self._conductivity_average(D[2:, 1:-1], D[1:-1,1:-1]) * (S[2:,1:-1] - S[1:-1,1:-1]) / self.dz**2 \
-		#	- self._conductivity_average(D[1:-1,1:-1], D[1:-1, :-2]) * (S[1:-1,1:-1] - S[:-2,1:-1]) / self.dz**2
-		# phinv = div0(1, phi_last, 0.)
-		# phinv[phi_last < 0.05] = 0.
-		# self.S[1:-1,1:-1] += self.dt * phinv[1:-1,1:-1] * (dSx + dSz)# - expl[1:-1,1:-1])
 
 		z_newice, x_newice = np.where((phi_last > 0) & (self.phi == 0))
 		water = np.where(self.phi >= self.rejection_cutoff)
