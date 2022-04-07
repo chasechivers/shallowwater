@@ -35,6 +35,7 @@ class HeatSolver:
 
 		self.saturation_time = 0
 		self.num_iter = []
+		self._niter = self.num_iter.append
 		self.ITER_KILL = 2000
 
 	def set_outputs(self, output_frequency: int, tmp_dir: str = "./tmp/", tmp_file_name: str = "",
@@ -142,9 +143,19 @@ class HeatSolver:
 				self.use_orbits = False
 			if self.use_orbits is True:
 				self.nu = 0
-				x = (self.constants.rAU) * (1 - self.constants.ecc ** 2)
+				x = (self.constants.rAU) * (1 - self.constants.ecc * self.constants.ecc)
 				r = x / (1 + self.constants.ecc * np.cos(self.nu))
-				self.nudot = (self.constants.GM * x) ** 0.5 / r ** 2
+				self.nudot = (self.constants.GM * x) ** 0.5 / (r * r)
+
+		if top == "ConstFlux":
+			try:
+				if isinstance(kwargs["qtop"], (float, int)):
+					self.qtop = kwargs["qtop"] * np.ones(self.nx, dtype=float)
+				else:
+					self.qtop = kwargs["qtop"]
+			except KeyError:
+				raise Exception("Value for flux at base of ice shell not given\n\t->e.g., model.set_boundaryconditions("
+				                "top='ConstFlux' qtop=1e-3)")
 
 		if bottom is True:
 			self.TbotBC = self.T_initial[-1, :].copy()
@@ -219,6 +230,26 @@ class HeatSolver:
 		# all water
 		self.phi[H > Hl] = 1.
 
+	def _xdir(self, z_ix, x_ix, T):
+		if self.symmetric and x_ix in [0, self.nx - 1]:
+			return 0
+		else:
+			return abs(T[z_ix, x_ix - 1] - T[z_ix, x_ix + 1]) / 2 / self.dx
+
+	def _zdir(self, z_ix, x_ix, T):
+		if z_ix == self.nz - 1:
+			return (T[z_ix - 1, x_ix] - T[z_ix, x_ix]) / self.dz
+		else:
+			return (T[z_ix - 1, x_ix] - T[z_ix + 1, x_ix]) / 2 / self.dz
+
+	@np.vectorize
+	def _entrain_param(self, S, dTz, dTx):
+		if (dTz > 0 if self.composition != "HCN" else dTz < 0):
+			return S
+		else:
+			dT = (dTx + abs(dTz)) / 2.
+			return self.entrain_salt(dT=dT, S=S)
+
 	def _update_salinity(self, phi_last):
 		"""Parameterization for brine drainage, entrainment, and chemical mixing in the liquid portion.
 
@@ -231,44 +262,21 @@ class HeatSolver:
 		----------
 		None
 		"""
-
+    
 		z_newice, x_newice = np.where((phi_last > 0) & (self.phi == 0))
 		water = np.where(self.phi >= self.rejection_cutoff)
 		volume = water[1].shape[0]
-		self.removed_salt.append(0)
+		# self.removed_salt.append(0)
+		self._rsapp(0)
 
-		if len(z_newice) > 0 and volume != 0 and self.phi[self.phi > 0].any():  # self.phi.sum() > 0:
+		if len(z_newice) > 0 and volume != 0 and self.phi[self.phi > 0].any():
 			S_old = self.S.copy()
-			for i in range(len(z_newice)):
-				S_liquid = self.S[z_newice[i], x_newice[i]]
-
-				if self.symmetric and x_newice[i] in [0, self.nx - 1]:
-					dTx = 0.
-				else:
-					# first-order centered
-					dTx = abs(self.T[z_newice[i], x_newice[i] - 1] - self.T[z_newice[i], x_newice[i] + 1]) / 2 / self.dx
-
-				if z_newice[i] in [self.nz - 1]:
-					dTz = (self.T[z_newice[i] - 1, x_newice[i]] - self.T[z_newice[i], x_newice[i]]) / self.dz
-				else:
-					# first-order centered derivative
-					dTz = (self.T[z_newice[i] - 1, x_newice[i]] - self.T[z_newice[i] + 1, x_newice[i]]) / 2 / self.dz
-
-				# brine drainage parameterization:
-				#  bottom of intrusion -> no gravity-drainage, salt stays
-				if (dTz > 0 if self.composition != "HCN" else dTz < 0):
-					self.S[z_newice[i], x_newice[i]] = S_liquid
-
-				elif (dTz < 0 if self.composition != "HCN" else dTz > 0):
-					# dT = np.hypot(dTx, dTz)  # gradient across the diagonal of the cell
-					# dT = max(abs(dTx), abs(dTz))  # maximum value
-					dT = (dTx + abs(dTz)) / 2.  # arithmetic mean
-					# salt entrained in newly formed ice determined by Buffo et al., 2020 results. (See
-					# IceSystem.entrain_salt() function)
-					self.S[z_newice[i], x_newice[i]] = self.entrain_salt(dT=dT, S=S_liquid)  # , self.composition)
+			dTx = [self._xdir(i, j, self.T) for i, j in zip(z_newice, x_newice)]
+			dTz = [self._zdir(i, j, self.T) for i, j in zip(z_newice, x_newice)]
+			self.S[z_newice, x_newice] = self._entrain_param(self, S_old[z_newice, x_newice], dTz, dTx)
 
 			if self.salinate:
-				self.S[water] = self.S[water] + abs(S_old.sum() - self.S.sum()) / volume
+				self.S[water] = self.S[water] + abs((S_old - self.S).sum()) / volume
 
 				self.removed_salt[-1] += (self.S[self.S >= self.saturation_point] - self.saturation_point).sum()
 
@@ -279,15 +287,19 @@ class HeatSolver:
 				z_newwater, x_newwater = np.where((phi_last == 0) & (self.phi > 0))  # find where ice may have melted
 				if len(z_newwater) > 0:
 					self.S[water] = self.S[water].sum() / volume
-			total_S_new = self.S.sum() + sum(self.removed_salt)
-			if abs(total_S_new - self.total_salt[0]) > self.STOL:
-				self.total_salt.append(total_S_new)
-				# raise Exception('Salt mass not being conserved')
-				pass
-			else:
-				self.total_salt.append(total_S_new)
 
-		if (self.S >= self.saturation_point).any() and water[0].sum() > 0 and self.saturation_time == 0:
+			total_S_new = self.S.sum() + sum(self.removed_salt)
+
+			if abs(total_S_new - self.total_salt[0]) > self.STOL:
+				# self.total_salt.append(total_S_new)
+				self._tsapp(total_S_new)
+			# raise Exception('Salt mass not being conserved')
+
+			else:
+				# self.total_salt.append(total_S_new)
+				self._tsapp(total_S_new)
+
+		if (self.S >= self.saturation_point).any() and water[0].shape[0] > 0 and self.saturation_time == 0:
 			self.saturation_time = self.model_time
 
 	def _update_sources_sinks(self, phi_last, T, Tm):
@@ -307,16 +319,13 @@ class HeatSolver:
 		Q : np.ndarray, float
 			Internal heat production or external heat sources, W/m^3
 		"""
-		latent_heat = self.constants.rho_i * self.constants.Lf * (self.phi - phi_last) / self.dt
+		latent_heat = - self.constants.rho_i * self.constants.Lf * (self.phi - phi_last) / self.dt
 		tidal_heat = 0
 
 		if self.TIDAL_HEAT:
 			tidal_heat = self.tidal_heating(phi_last, T, Tm)
 
-		sources = tidal_heat
-		sinks = latent_heat
-		Q = sources - sinks
-		return Q
+		return tidal_heat + latent_heat
 
 	def _sublimation_heat_loss(self, T=None):
 		"""Heat loss at the surface from ice sublimation.
@@ -366,7 +375,7 @@ class HeatSolver:
 		q : float
 			Heat flux to surface from the sun, W/m^2
 		"""
-		q = (1 - self.constants.albedo) * self.constants.solar_const / self.constants.rAU ** 2
+		q = (1 - self.constants.albedo) * self.constants.solar_const / (self.constants.rAU * self.constants.rAU)
 		return q
 
 	def _apply_boundaryconditions(self, T, k, rhoc):
@@ -395,19 +404,22 @@ class HeatSolver:
 
 		elif self.botBC == "ConstFlux":
 			if self.coords in ["cartesian", "xz", "zx"]:
-				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / self.dx ** 2 \
-				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / self.dx ** 2
+				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / (
+							self.dx * self.dx) \
+				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / (
+							      self.dx * self.dx)
 
 			elif self.coords in ["cylindrical", "zr", "rz"]:
 				rph = 0.5 * (self.X[-1, 1:-1] + self.X[-1, 2:])
 				rmh = 0.5 * (self.X[-1, 1:-1] + self.X[-1, :-2])
 				dqx = (rph * self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1])
 				       - rmh * self._conductivity_average(k[-1, 1:-1], k[-1, :-2]) * (T[-1, 1:-1] - T[-1, :-2])
-				       ) / self.X[-1, 1:-1] / self.dx ** 2
+				       ) / self.X[-1, 1:-1] / (self.dx * self.dx)
 			dqx *= self.dt / rhoc[-1, 1:-1]
 
 			dqz = self.qbot[1:-1] / self.dz \
-			      - self._conductivity_average(k[-1, 1:-1], k[-2, 1:-1]) * (T[-1, 1:-1] - T[-2, 1:-1]) / self.dz ** 2
+			      - self._conductivity_average(k[-1, 1:-1], k[-2, 1:-1]) * (T[-1, 1:-1] - T[-2, 1:-1]) / (
+						      self.dz * self.dz)
 			dqz *= self.dt / rhoc[-1, 1:-1]
 			# dqz = self.T[-2, 1:-1] + self.dz * self.qbot[1:-1] / k[-1, 1:-1]
 
@@ -419,44 +431,49 @@ class HeatSolver:
 			              self.S[-1, :] if self.botBC == "IceFlux" else (self.concentration if self.issalt else 0))
 
 			if self.coords in ["cartesian", "xz", "zx"]:
-				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / self.dx ** 2 \
-				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / self.dx ** 2
+				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / (
+							self.dx * self.dx) \
+				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / (
+							      self.dx * self.dx)
 
 			elif self.coords in ["cylindrical", "zr", "rz"]:
 				rph = 0.5 * (self.X[-1, 1:-1] + self.X[-1, 2:])
 				rmh = 0.5 * (self.X[-1, 1:-1] + self.X[-1, :-2])
 				dqx = (rph * self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1])
 				       - rmh * self._conductivity_average(k[-1, 1:-1], k[-1, :-2]) * (T[-1, 1:-1] - T[-1, :-2])
-				       ) / self.X[-1, 1:-1] / self.dx ** 2
+				       ) / self.X[-1, 1:-1] / (self.dx * self.dx)
 
 			dqx *= self.dt / rhoc[-1, 1:-1]
 
 			dqz = self._conductivity_average(kbot, k[-1, 1:-1]) * (self.T_bottom_boundary - T[-1, 1:-1]) \
 			      - self._conductivity_average(k[-1, 1:-1], k[-2, 1:-1]) * (T[-1, 1:-1] - T[-2, 1:-1])
-			dqz *= self.dt / rhoc[-1, 1:-1] / self.dz ** 2
+			dqz *= self.dt / rhoc[-1, 1:-1] / (self.dz * self.dz)
 
 			self.T[-1, 1:-1] = T[-1, 1:-1] + dqx + dqz + self.dt * self.Q[-1, 1:-1] / rhoc[-1, 1:-1]
 
 		elif self.botBC == "GhostIce":
 			kghost = self.ki(self.TBotGhost, self.S)
 			if self.coords in ["cartesian", "xz", "zx"]:
-				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / self.dx ** 2 \
-				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / self.dx ** 2
+				dqx = self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1]) / (
+							self.dx * self.dx) \
+				      - self._conductivity_average(k[-1, 1:-1], k[-2, :-2]) * (T[-1, 1:-1] - T[-1, :-2]) / (
+							      self.dx * self.dx)
 
 			elif self.coords in ["cylindrical", "zr", "rz"]:
 				rph = 0.5 * (self.X[-1, 1:-1] + self.X[-1, 2:])
 				rmh = 0.5 * (self.X[-1, 1:-1] + self.X[-1, :-2])
 				dqx = (rph * self._conductivity_average(k[-1, 2:], k[-1, 1:-1]) * (T[-1, 2:] - T[-1, 1:-1])
 				       - rmh * self._conductivity_average(k[-1, 1:-1], k[-1, :-2]) * (T[-1, 1:-1] - T[-1, :-2])
-				       ) / self.X[-1, 1:-1] / self.dx ** 2
+				       ) / self.X[-1, 1:-1] / (self.dx * self.dx)
 
 			dqx *= self.dt / rhoc[-1, 1:-1]
 
 			dqz = self._conductivity_average(kghost[1:-1], k[-1, 1:-1]) * (self.TBotGhost[1:-1] - T[-1, 1:-1]) \
 			      - self._conductivity_average(k[-1, 1:-1], k[-2, 1:-1]) * (T[-1, 1:-1] - T[-2, 1:-1])
-			dqz *= self.dt / rhoc[-1, 1:-1] / self.dz ** 2
+			dqz *= self.dt / rhoc[-1, 1:-1] / (self.dz * self.dz)
 
 			self.T[-1, 1:-1] = T[-1, 1:-1] + dqx + dqz + self.dt * self.Q[-1, 1:-1] / rhoc[-1, 1:-1]
+
 		# END BOTTOM BOUNDARY CONDITIONS   #
 		####################################
 
@@ -471,15 +488,16 @@ class HeatSolver:
 
 		elif self.topBC == "Radiative":
 			if self.coords in ["cartesian", "xz", "zx"]:
-				dqx = self._conductivity_average(k[0, 2:], k[0, 1:-1]) * (T[0, 2:] - T[0, 1:-1]) / self.dx ** 2 \
-				      - self._conductivity_average(k[0, 1:-1], k[0, :-2]) * (T[0, 1:-1] - T[0, :-2]) / self.dx ** 2
+				dqx = self._conductivity_average(k[0, 2:], k[0, 1:-1]) * (T[0, 2:] - T[0, 1:-1]) / (self.dx * self.dx) \
+				      - self._conductivity_average(k[0, 1:-1], k[0, :-2]) * (T[0, 1:-1] - T[0, :-2]) / (
+							      self.dx * self.dx)
 
 			elif self.coords in ["cylindrical", "zr", "rz"]:
 				rph = 0.5 * (self.X[0, 1:-1] + self.X[0, 2:])
 				rmh = 0.5 * (self.X[0, 1:-1] + self.X[0, :-2])
 				dqx = (rph * self._conductivity_average(k[0, 2:], k[0, 1:-1]) * (T[0, 2:] - T[0, 1:-1])
 				       - rmh * self._conductivity_average(k[0, 1:-1], k[0, :-2]) * (T[0, 1:-1] - T[0, :-2])
-				       ) / self.X[0, 1:-1] / self.dx ** 2
+				       ) / self.X[0, 1:-1] / (self.dx * self.dx)
 
 			dqx *= self.dt / rhoc[0, 1:-1]
 
@@ -506,20 +524,24 @@ class HeatSolver:
 				# More complex implementation of radiative boundary that takes time/orbit into account #
 				# Currently not used as its not very applicable at typical time/space steps            #
 				########################################################################################
+				# convert all degs to rads
+				obl = np.deg2rad(self.constants.obliq)
+				Lp = np.deg2rad(self.constants.lonPer)
+				lat = np.deg2rad(self.constants.latitude)
 				# heat imparted on surface ice by solar radiation
 				solar_flux = self._solar_flux()
 				_h = (2 * np.pi * self.model_time / self.constants.solar_day) % (2 * np.pi)
-				_x = self.constants.rAU * (1 - self.constants.ecc ** 2)
+				_x = self.constants.rAU * (1 - self.constants.ecc * self.constants.ecc)
 
 				self.nu = self.nudot * self.dt
 				_r = _x / (1 + self.constants.ecc * np.cos(self.nu))
-				self.nudot = _r ** -2 * (self.constants.GM * _x) ** 0.5
+				self.nudot = (self.constants.GM * _x) ** 0.5 / (_r * _r)
 
-				_dec = np.arcsin(np.sin(self.constants.obliq) * np.sin(self.nu + self.constants.lonPer))
-				_c = np.sin(self.constants.latitude) * np.sin(_dec) \
-				     + np.cos(self.constants.latitude) * np.cos(_dec) * np.cos(_h)
+				_dec = np.arcsin(np.sin(obl) * np.sin(self.nu + Lp))
+				_c = np.sin(lat) * np.sin(_dec) \
+				     + np.cos(lat) * np.cos(_dec) * np.cos(_h)
 				_c = 0.5 * (_c + np.abs(_c))
-				solar_flux *= _c * (self.constants.rAU / _r) ** 2
+				solar_flux *= _c * (self.constants.rAU / _r) * (self.constants.rAU / _r)
 				# account for thermal inertia?
 				solar_flux *= skindepth / self.dz
 				qout -= solar_flux
@@ -527,8 +549,9 @@ class HeatSolver:
 			# ratio = skindepth / self.dz
 			# dqz = (qn - q0) * (1 - ratio) - (radiation + sublimation - solar_flux) * ratio
 
-			dqz = self._conductivity_average(k[1, 1:-1], k[0, 1:-1]) * (T[1, 1:-1] - T[0, 1:-1]) / self.dz ** 2 \
-			      - qout[1:-1] / self.dz
+			dqz = self._conductivity_average(k[1, 1:-1], k[0, 1:-1]) * (T[1, 1:-1] - T[0, 1:-1]) / (self.dz *
+			                                                                                        self.dz) - qout[
+			                                                                                                   1:-1] / self.dz
 
 			dqz *= self.dt / rhoc[0, 1:-1]
 
@@ -562,20 +585,20 @@ class HeatSolver:
 				dqx = self._conductivity_average(k[1:-1, -1], kinit_R) * (self.T_initial[1:-1, -1] - T[1:-1, -1]) \
 				      * self.dx / self.dL \
 				      - self._conductivity_average(k[1:-1, -1], k[1:-1, -2]) * (T[1:-1, -1] - T[1:-1, -2])
-				dqx /= self.dx ** 2
+				dqx /= self.dx * self.dx
 
 			if self.coords in ["cylindrical", "zr", "rz"]:
 				rph = 0.5 * (self.X[1:-1, -1] + self.X[1:-1, -1] + self.dL) * self.dx / self.dL
 				rmh = 0.5 * (self.X[1:-1, -1] + self.X[1:-1, -2])
 				dqx = (rph * self._conductivity_average(k[1:-1, -1], kinit_R) * (self.T_initial[1:-1, -1] - T[1:-1, -1])
 				       - rmh * self._conductivity_average(k[1:-1, -1], k[1:-1, -2]) * (T[1:-1, -1] - T[1:-1, -2])
-				       ) / self.X[1:-1, -1] / self.dx ** 2
+				       ) / self.X[1:-1, -1] / (self.dx * self.dx)
 
 			dqx *= self.dt / rhoc[1:-1, -1]
 
 			dqz = self._conductivity_average(k[2:, -1], k[1:-1, -1]) * (T[2:, -1] - T[1:-1, -1]) \
 			      - self._conductivity_average(k[1:-1, -1], k[:-2, -1]) * (T[1:-1, -1] - T[:-2, -1])
-			dqz *= self.dt * dqz / self.dz ** 2 / rhoc[1:-1, -1]
+			dqz *= self.dt * dqz / (self.dz * self.dz) / rhoc[1:-1, -1]
 
 			self.T[1:-1, -1] = T[1:-1, -1] + dqz + dqx + self.dt * self.Q[1:-1, -1] / rhoc[1:-1, -1]
 
@@ -630,22 +653,47 @@ class HeatSolver:
 			Heat fluxes
 		"""
 		if self.coords in ["cartesian", "xz", "zx"]:
-			dqx = self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1]) / self.dx ** 2 \
+			dqx = self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1]) / (
+						self.dx * self.dx) \
 			      - self._conductivity_average(k[1:-1, 1:-1], k[1:-1, :-2]) * (
-						      T[1:-1, 1:-1] - T[1:-1, :-2]) / self.dx ** 2
+					      T[1:-1, 1:-1] - T[1:-1, :-2]) / (self.dx * self.dx)
+			self._get_gradients = self._get_gradients_cart
 
 		elif self.coords in ["cylindrical", "zr", "rz"]:
 			# Must account for curvature in a cylindrical system
 			#  see pg. 252 in Langtangen & Linge (2017) "Finite Difference Computing with PDEs"
-			rph = 0.5 * (self.X[1:-1, 2:] + self.X[1:-1, 1:-1])
-			rmh = 0.5 * (self.X[1:-1, 1:-1] + self.X[1:-1, :-2])
-			dqx = (rph * self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1])
-			       - rmh * self._conductivity_average(k[1:-1, 1:-1], k[1:-1, :-2]) * (T[1:-1, 1:-1] - T[1:-1, :-2])
-			       ) / self.X[1:-1, 1:-1] / self.dx ** 2
+			dqx = (self._rph * self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1])
+			       - self._rmh * self._conductivity_average(k[1:-1, 1:-1], k[1:-1, :-2]) * (
+					       T[1:-1, 1:-1] - T[1:-1, :-2])
+			       ) / (self.dx * self.dx)
+			self._get_gradients = self._get_gradients_cyl
 
-		dqz = self._conductivity_average(k[2:, 1:-1], k[1:-1, 1:-1]) * (T[2:, 1:-1] - T[1:-1, 1:-1]) / self.dz ** 2 \
-		      - self._conductivity_average(k[1:-1, 1:-1], k[:-2, 1:-1]) * (T[1:-1, 1:-1] - T[:-2, 1:-1]) / self.dz ** 2
+		dqz = self._conductivity_average(k[2:, 1:-1], k[1:-1, 1:-1]) * (T[2:, 1:-1] - T[1:-1, 1:-1]) / (
+					self.dz * self.dz) \
+		      - self._conductivity_average(k[1:-1, 1:-1], k[:-2, 1:-1]) * (T[1:-1, 1:-1] - T[:-2, 1:-1]) / (
+					      self.dz * self.dz)
 
+		return dqx + dqz
+
+	def _get_gradients_cart(self, T, k, rhoc, Tll=None):
+		dqx = self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1]) / (
+					self.dx * self.dx) \
+		      - self._conductivity_average(k[1:-1, 1:-1], k[1:-1, :-2]) * (T[1:-1, 1:-1] - T[1:-1, :-2]) / (
+					      self.dx * self.dx)
+		dqz = self._conductivity_average(k[2:, 1:-1], k[1:-1, 1:-1]) * (T[2:, 1:-1] - T[1:-1, 1:-1]) / (
+					self.dz * self.dz) \
+		      - self._conductivity_average(k[1:-1, 1:-1], k[:-2, 1:-1]) * (T[1:-1, 1:-1] - T[:-2, 1:-1]) / (
+					      self.dz * self.dz)
+		return dqx + dqz
+
+	def _get_gradients_cyl(self, T, k, rhoc, Tll=None):
+		dqx = (self._rph * self._conductivity_average(k[1:-1, 2:], k[1:-1, 1:-1]) * (T[1:-1, 2:] - T[1:-1, 1:-1])
+		       - self._rmh * self._conductivity_average(k[1:-1, 1:-1], k[1:-1, :-2]) * (T[1:-1, 1:-1] - T[1:-1, :-2])
+		       ) / (self.dx * self.dx)
+		dqz = self._conductivity_average(k[2:, 1:-1], k[1:-1, 1:-1]) * (T[2:, 1:-1] - T[1:-1, 1:-1]) / (
+					self.dz * self.dz) \
+		      - self._conductivity_average(k[1:-1, 1:-1], k[:-2, 1:-1]) * (T[1:-1, 1:-1] - T[:-2, 1:-1]) / (
+					      self.dz * self.dz)
 		return dqx + dqz
 
 	def _print_all_opts(self, nt):
@@ -804,28 +852,31 @@ class HeatSolver:
 		if self.coords in ["cylindrical", "zr", "rz"]:
 			Tll = T_last.copy()
 		while (TErr > self.TTOL or phiErr > self.PHITOL):
-
 			# calculate the fluxes in each grid cell
-			dflux = self._get_gradients(
-					T_last, k_last, rhoc_last,
-					None if self.coords in ["cartesian", "zx", "xz"] else Tll)
+			dflux = self._get_gradients(T_last, k_last, rhoc_last, None)
 
 			# update the liquid fraction
 			self._update_liquid_fraction(phi_last=phi_last)
 			# update salinity: entrain, reject, and mix salts
 			if self.issalt:
 				self._update_salinity(phi_last=phi_last)
+
 			# update the sources and sinks
 			self.Q = self._update_sources_sinks(phi_last=phi_last, T=T_last, Tm=self.Tm)
+
 			# calculate new temperatures at time step n
 			self.T[1:-1, 1:-1] = T_last[1:-1, 1:-1] + self.dt * dflux / rhoc_last[1:-1, 1:-1]
 			self.T += self.Q * self.dt / rhoc_last
+
 			# apply the boundary conditions
 			self._apply_boundaryconditions(T_last, k_last, rhoc_last)
+
 			# update the specific heat
-			rhoc = self.rhoc(self.phi, self.T, self.S)
+			rhoc_last = self.rhoc(self.phi, self.T, self.S)
+
 			# update the thermal conductivity
-			k = self.k(self.phi, self.T, self.S)
+			k_last = self.k(self.phi, self.T, self.S)
+
 			# calculate the error for convergence
 			TErr = (abs(self.T - T_last)).max()
 			phiErr = (abs(self.phi - phi_last)).max()
@@ -835,16 +886,14 @@ class HeatSolver:
 				raise Exception(f"solution not converging,\n\t iterations = {iter_k}\n\t T error ={TErr}\n\t phi "
 				                f"error = {phiErr}")
 			# check for errors
-			# self._error_check()
+			self._error_check()
 
 			iter_k += 1
 			Tll = T_last.copy()
 			T_last, phi_last = self.T.copy(), self.phi.copy()
-			# k_last, rhoc_last = self.k.copy(), self.rhoc.copy()
-			rhoc_last = rhoc.copy()
-			k_last = k.copy()
+
 		# outputs here
-		self.num_iter.append(iter_k)
+		self._niter(iter_k)
 		self.model_time += self.dt
 
 	def solve_heat(self, nt: int = None, dt: float = None, save_progress: float = 25, final_time: float = None):
@@ -874,7 +923,9 @@ class HeatSolver:
 			raise Exception("Please choose the number of time steps or the final time")
 
 		if dt is None and self.ADAPT_DT:
+			old_of = self.dt * self.outputs.output_frequency
 			self._set_dt(self.CFL)
+			self.outputs.output_frequency = int(old_of / self.dt)
 		else:
 			pass
 
@@ -883,17 +934,19 @@ class HeatSolver:
 		elif (nt is not None and final_time is None):
 			final_time = np.ceil(nt * self.dt)
 
+		V0 = self.phi_initial.sum()
 		t0 = self.model_time
 		n0 = int(0) if t0 == 0 else int(t0 / self.dt)
-		if self.verbose:
-			print(f" Starting {nt} time steps")
-			if n0 == 0:
-				self._print_all_opts(nt)
+		if self.verbose and n0 == 0:
+			self._print_all_opts(nt)
+			print(f" Starting simulation for {final_time} s ({final_time / 3.154e7} yr)")
+
 		n = n0
 		while (n < nt) or (self.model_time < t0 + final_time):
-			start_time = _timer_.time()
+			start_time = _timer_.perf_counter()
 			if self.ADAPT_DT:
 				self._set_dt(self.CFL)
+				self.outputs.output_frequency = int(old_of / self.dt + 1)
 			self.time_step()
 			try:  # save outputs
 				self.outputs.get_results(self, n)
@@ -902,14 +955,13 @@ class HeatSolver:
 
 			if self.FREEZE_STOP:
 				if (self.phi[self.geom] == 0).all():
-					self.run_time *= 2.05
 					print(f"Instrusion frozen at {self.model_time:0.04f} s")
 					print(f"  run time: {self.run_time} s")
 					return
 
 			# save progress, in case of a long run time, can restart with saved model!
 			if isinstance(save_progress, (int, float)):
-				pct_frozen = 100 * (1 - self.phi.sum() / self.phi_initial.sum())
+				pct_frozen = 100 * (1 - self.phi.sum() / V0)
 				if pct_frozen % save_progress <= 1e-3:
 					# if save_progress - 1e-3 <= pct_frozen <= save_progress + 1e-3:
 					if self.verbose: print(f">> Saving progress at {pct_frozen}%")
@@ -921,6 +973,6 @@ class HeatSolver:
 			# uf.save_data(self, "model_runID{}.pkl".format(self.outputs.tmp_data_file_name.split("runID")[1]),
 			#          self.outputs.tmp_data_directory, final=0)
 
-			self.run_time += _timer_.time() - start_time  # - self.run_time
+			self.run_time += _timer_.perf_counter() - start_time  # - self.run_time
 			n = n + 1
 		return

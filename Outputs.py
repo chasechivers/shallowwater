@@ -5,9 +5,15 @@ from utility_funcs import *
 
 class Outputs:
 	def __init__(self, OF: int, tmpdir: str, name: str = ""):
-		self.tmp_data_directory = tmpdir
-		self.tmp_data_file_name = 'tmp_data_runID' + ''.join(
-				random.choice(string.digits) for _ in range(4)) + f"_{name}"
+		self.tmp_data_file_name = f'tmp_data_runID{"".join(random.choice(string.digits) for _ in range(4))}_{name}'
+		# make a new directory to hold all temporary files in
+		self.tmp_data_directory = f'{tmpdir}{self.tmp_data_file_name[9:]}_tmpfiles/'
+		try:
+			os.mkdir(self.tmp_data_directory)
+		except FileExistsError:
+			print(f'WARNING! Directory {self.tmp_data_directory} already exists. May overwrite or include in final '
+			      'results the temporary output files already there')
+
 		self.output_frequency = int(OF)
 
 	def choose(self, outlist: list, issalt: bool):

@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class constants:
 	styr: float = 3.154e7  # s/yr, seconds in a year
 
 	# Orbital/other parameters
-	GM: float = 3.96423e-14  # G*Msun [AU**3/s**2]
+	GM: float = 3.96423e-14  # G*Msun [AU^3/s^2]
 	g: float = 1.32  # m/s2, Europa surface gravity
-	rAU: float = 5.204418995784543  # AU, Europa's solar distance
+	rAU: float = 5.20442  # AU, Europa's solar distance
 	# ecc : float    = 0.009       # Europa's eccentricity about Jupiter
 	ecc: float = 0.049  # Jupiter's eccentricity about the sun
 	obliq: float = 3.1  # Jupiter's obliquity
@@ -53,4 +52,4 @@ class constants:
 
 	# Mechanical properties of ice
 	G: float = 3.52e9  # Pa, shear modulus/rigidity (Moore & Schubert, 2000)
-	E: float = 2.66 * G  # Pa, Young's Modulus
+	E: float = 2.66 * G  # Pa, Young's Modulus, assuming Poisson's ratio of 0.33
