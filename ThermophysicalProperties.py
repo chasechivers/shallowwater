@@ -6,7 +6,7 @@ class ThermophysicalProperties:
 	Class instance to hold all of the thermophysical properties of the phases in a simulation.
 	"""
 
-	def ki_eff(self, k, p, which=4):
+	def ki_eff(self, k, p, which=2):
 		"""Function for effective ice thermal conductivity as a function of porosity.
 
 		Parameters

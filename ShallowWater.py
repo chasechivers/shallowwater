@@ -1,12 +1,15 @@
+import dill as pickle
 import numpy as np
 from scipy import optimize
-from HeatSolver import HeatSolver
-import constants
+
 import SalinityConstants
+import constants
+import utility_funcs as uf
+from HeatSolver import HeatSolver
 from ThermophysicalProperties import ThermophysicalProperties
 
 
-class IceSystem(HeatSolver, ThermophysicalProperties):
+class ShallowWater(HeatSolver, ThermophysicalProperties):
 	"""Class with methods to set up initial conditions for two-dimensional, two-phase thermal diffusion model that
 	includes temperature-dependent conductivity and salinity. Includes the HeatSolver class used to solve the heat
 	equation utilizing an enthalpy method (Huber et al., 2008) to account for latent heat from phase change as well
@@ -14,7 +17,9 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 
 	def __init__(
 			self, w, D, dx=None, dz=None, nx=None, nz=None, kT=True,
-			use_X_symmetry=True, coordinates="cartesian", verbose=False):
+			use_X_symmetry=True, coordinates="cartesian", verbose=False,
+			consts=constants.constants()
+	):
 		"""Initialize the system.
 		Parameters
 		----------
@@ -54,7 +59,7 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		"""
 		super().__init__()
 		# Create constants for simulations
-		self.constants = constants.constants()
+		self.constants = consts
 		self.model_time, self.run_time = 0, 0
 		# generally a stable time step for most simulations, likely too small for many runs
 		#  derived from 1D CFL condition: dt < min(dx,dz)**2 / max(k/rho/cp) / 6
@@ -99,10 +104,16 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 			self.X, self.Z = np.meshgrid(np.array([-self.w / 2 + i * self.dx for i in range(self.nx)], dtype=float),
 			                             np.array([j * self.dz for j in range(self.nz)], dtype=float))
 
+		# save curvature accounting for cylindrical system
+		if self.coords in self.coords in ["cylindrical", "zr", "rz"]:
+			self._rph = 0.5 * (self.X[1:-1, 2:] + self.X[1:-1, 1:-1]) / self.X[1:-1, 1:-1]
+			self._rmh = 0.5 * (self.X[1:-1, 1:-1] + self.X[1:-1, :-2]) / self.X[1:-1, 1:-1]
+
 		# Create scalar field grids
 		self.T = self.constants.Tm * np.ones((self.nz, self.nx), dtype=float)  # initialize domain at one temperature
 		self.S = np.zeros((self.nz, self.nx), dtype=float)  # initialize domain with no salt
 		self.phi = np.zeros((self.nz, self.nx), dtype=float)  # initialize domain as ice
+		self.Q = np.zeros((self.nz, self.nx), dtype=float)
 
 	def tidal_heating(self, phi=None, T=None, Tm=None):
 		"""Temperature-dependent internal tidal heating for an incompressible Maxwell body applied to an ice shell as
@@ -474,13 +485,11 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		       ∆t = CFL * min(∆x, ∆z)^2 / max(diffusivity)
 		where diffusivity = conductivity / density / specific heat. We want to minimize ∆t, thus
 		      max(diffusivity) = min(density * specific heat) / max(conductivity)
-		CFL is the Courant-Fredrichs-Lewy condition, a factor to help with stabilization
+		CFL is the Courant-Fredrichs-Lewy condition, a factor generally < 1/3 to help with stabilization
 		"""
-		if self.kT:
-			self.dt = CFL * min([self.dz, self.dx]) ** 2 * self.rhoc().min() / (
-				self._conductivity_average(self.k().max(), self.k()[self.k() < self.k().max()].max()))
-		else:
-			self.dt = CFL * min([self.dz, self.dx]) ** 2 * self.rhoc().min() / self.k().max()
+		# dx2 = min([self.dz, self.dx]) ** 2
+		dx2 = (1 / self.dz ** 2 + 1 / self.dx ** 2) ** -1
+		self.dt = CFL * dx2 * (self.rhoc() / self.k()).min()
 
 	def init_porosity(self, pmax=0.2, t=3.154e14):
 		"""Initialize the void/fracture porosity of Europa's ice shell as caused by tidal fracturing after one million
@@ -508,12 +517,14 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		self.porosity = pmax * np.exp(-t / tau)
 		self._set_dt(self.CFL)
 
-	###
+	# ------------------------------------------------------------------------
 	# Define a bunch of useful functions for salty systems, unused otherwise
-	####
+	# ------------------------------------------------------------------------
 
+	# ----------------------------------------------------------------------------------------------------------------
 	# Constitutive equation fits that relate temperature gradient at time of freezing (i.e. freeze rate) to entrained
-	# salt content. All are from Buffo et al, 2020a unless specified.
+	# salt content. All are from Buffo et al., 2020a unless specified.
+	# ----------------------------------------------------------------------------------------------------------------
 	@staticmethod
 	def shallow_fit(dT, a, b, c, d):
 		"""
@@ -631,41 +642,47 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		Assume freezing of a 100 ppt salt solution by a thermal gradient of 0.2 over 20 meters
 		>>> salt_in_ice = model.entrain_salt(0.2/20, 100)
 		"""
-		if isinstance(dT, (int, float)):
-			if dT >= dTMAX:
-				return S
-			else:
-				if S in self.concentrations:
-					if self.composition in SalinityConstants.new_fit_consts.keys():
-						ans = self.new_fit(dT, *self.new_fit_consts[S])
-						return S if ans > S else ans
-					elif self.composition in (
-							SalinityConstants.linear_consts.keys() and SalinityConstants.shallow_consts.keys()):
-						ans = self.linear_fit(dT, *self.linear_consts[S]) if dT <= self.linear_shallow_roots[S] \
-							else self.shallow_fit(dT, *self.shallow_consts[S])
-						return S if ans > S else ans
-					else:
-						raise Exception("Salt not included")
+		# if isinstance(dT, (int, float)):
+		if dT >= dTMAX:
+			return S
+		else:
+			if S in self.concentrations:
+				if self.composition in SalinityConstants.new_fit_consts.keys():
+					ans = self.new_fit(dT, *self.new_fit_consts[S])
+					return S if ans > S else ans
+
+				elif self.composition in (
+						SalinityConstants.linear_consts.keys() and SalinityConstants.shallow_consts.keys()):
+
+					# smoothing function between fits: not really needed, but here
+					# sigma = 1. / (1 + np.exp(-(dT - self.linear_shallow_roots[S]) / 0.5))
+					# ans = (1 - sigma) * self.linear_fit(dT, *self.linear_consts[S]) \
+					#      + sigma * self.shallow_fit(dT, *self.shallow_consts[S])
+
+					ans = self.linear_fit(dT, *self.linear_consts[S]) if dT <= self.linear_shallow_roots[S] \
+						else self.shallow_fit(dT, *self.shallow_consts[S])
+
+					return S if ans > S else ans
 
 				else:
-					# interpolation & extrapolation steps
-					## interpolation: choose th
-					c_min = self.concentrations[
-						S > self.concentrations].max() if S <= self.concentrations.max() else \
-						self.concentrations[-2]
-					c_max = self.concentrations[
-						S < self.concentrations].min() if S <= self.concentrations.max() else \
-						self.concentrations[-1]
-					# linearly interpolate between the two concentrations at gradient dT
-					m, b = np.polyfit([c_max, c_min],
-					                  [self.entrain_salt(dT, c_max), self.entrain_salt(dT, c_min)],
-					                  1)
+					raise Exception("Salt not included")
 
-					# return concentration of entrained salt
-					ans = m * S + b
-					return S if ans > S else ans
-		else:
-			return np.array([self.entrain_salt(t, s) for t, s in zip(dT, S)], dtype=float)
+			else:
+				# interpolation & extrapolation steps
+				c_min = self.concentrations[
+					S > self.concentrations].max() if S <= self.concentrations.max() else \
+					self.concentrations[-2]
+				c_max = self.concentrations[
+					S < self.concentrations].min() if S <= self.concentrations.max() else \
+					self.concentrations[-1]
+				# linearly interpolate between the two concentrations at gradient dT
+				m, b = np.polyfit([c_max, c_min],
+				                  [self.entrain_salt(dT, c_max), self.entrain_salt(dT, c_min)],
+				                  1)
+
+				# return concentration of entrained salt
+				ans = m * S + b
+				return S if ans > S else ans
 
 	@staticmethod
 	def _get_salinity_consts(composition):
@@ -695,6 +712,7 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		else:
 			return shallow_consts, linear_consts, Tm_consts, depth_consts
 
+
 	def _get_salinity_roots(self):
 		"""Only used when the two old entrained salt vs temperature gradient functions are used (shallow_fit,
 		linear_fit) to determine at what temperature gradient to use either fit.
@@ -715,6 +733,7 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 			                 - self.linear_fit(x, *self.linear_consts[concentration])
 			linear_shallow_roots[concentration] = optimize.root(func, 3)['x']
 		return linear_shallow_roots
+
 
 	def _set_salinity_values(self, composition):
 		"""Only internal use in init_salinity. Assigns values for solutal contraction coefficients for density with
@@ -756,6 +775,7 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 			self.saturation_point = 1000
 			self.constants.rho_s = 0
 			self.enthalpy_of_formation = 0
+
 
 	def _get_interpolator(self):
 		import scipy.interpolate as intp
@@ -811,20 +831,18 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 		"""
 
 		self.issalt = True
-
-		if in_situ == True:
-			shell = True
-
-		self.composition = composition
 		self.concentration = concentration
 		self.rejection_cutoff = rejection_cutoff
 		self.salinate = salinate
+		self.composition = composition
+
+		if in_situ == True:
+			shell = True
 
 		if "fracture_width" in self.__dict__: self.salinate = False
 
 		self.heat_from_precipitation = True if "heat_from_precipitation" in kwargs and kwargs[
 			"heat_from_precipitation"] == 1 else False
-
 		if composition == "NaCl":
 			self.shallow_consts, self.linear_consts, self.Tm_consts, self.depth_consts, self.new_fit_consts = \
 				self._get_salinity_consts(composition)
@@ -851,8 +869,8 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 			# because the above equation from Buffo et al., 2020 is not well known for depths < 10 m, it will predict
 			# very high salinities, over the parent liquid concentration. Here, I force it to entrain all salt where
 			# it wants to concentrate more than physically possible.
-			self.S[self.S > concentration] = concentration * self.rejection_cutoff
-			self.S[self.S < 0] = concentration * self.rejection_cutoff
+			self.S[self.S > concentration] = concentration  # * self.rejection_cutoff
+			self.S[self.S < 0] = concentration  # * self.rejection_cutoff
 
 			if not in_situ:  # for water emplaced in a salty shell via injection
 				try:
@@ -891,7 +909,41 @@ class IceSystem(HeatSolver, ThermophysicalProperties):
 			self.entrain_salt = self._get_interpolator()
 
 		self.total_salt = [self.S.sum()]
+		self._tsapp = self.total_salt.append
 		self.removed_salt = []
+		self._rsapp = self.removed_salt.append
 
 		self._save_initials()
 		self._set_dt(self.CFL)
+
+	def write(self, save_dir='./', save_name=None, use_file_namer=True):
+		"""
+		Write model class to file.
+
+		Parameters
+		----------
+		save_dir : str
+			Directory to save model file into.
+			Defaults to current directory  './'
+		save_name : str
+			Name to save model file as
+			Defaults to (None) using utility_funcs.file_namer function
+		use_file_namer : bool
+			Whether to use utility_funcs.file_namer function given save_name parameter is None. If False,
+			will use either the name passed to the outputs class or just 'md'
+		Returns
+		----------
+		None
+		"""
+		if save_name is None:
+			fn = self.outputs.tmp_data_file_name.split('tmp_data_')[1]
+			if use_file_namer:
+				save_name = f'md_{fn}{uf.file_namer(self, "")}'
+			else:
+				if 'outputs' in self.__dict__.keys():
+					save_name = f'md_{fn}'
+				else:
+					save_name = 'md'
+		with open(f'{save_dir}{save_name}', 'wb') as output:
+			pickle.dump(self, output, -1)
+			output.close()

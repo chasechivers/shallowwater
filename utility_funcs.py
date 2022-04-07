@@ -1,6 +1,7 @@
 import dill as pickle
 import re
 import os
+import numpy as np
 
 
 def nat_sort(x):
@@ -10,27 +11,51 @@ def nat_sort(x):
 
 
 def file_namer(model, outputdir, *argv):
-	# defaults chosen for file so that the file name isn't enormous...
-	#  variables chosen to be model.__ can be changed to be included in file name if so desired
-	defaults = {'Lz': 5e3, 'Lx': 5e3, 'dx': 10, 'dz': 10, 'dt': 3.14e7 / (24 * 4), 'kT': True, 'cpT': True,
-	            'issalt': False, 'Tsurf': 0., 'Tbot': 0, 'topBC': True, 'botBC': True, 'sidesBC': True,
-	            'tidalheat': False, 'nx': model.nx, 'nz': model.nz, 'T_int': 273.15, 'depth': 0, 'R_int': 0,
-	            'thickness': 0, 'freezestop': model.freezestop, 'num_iter': model.num_iter,
-	            'model_time': model.model_time, 'run_time': model.run_time, 'Ttol': 0.1, 'phitol': 0.01,
-	            'symmetric': 0, 'Stol': 1, 'cp_i': model.cp_i, 'tidal_heat': model.tidal_heat, 'dL': 0,
-	            'botT': 0, 'std_set': 1}
+	"""
+	Automatically name a file so that simulation choices can be gleaned from only the file name!
+	:param model: IceSystem class
+		IceSystem class instance
+	:param outputdir: str
+		Directory that file will be saved to. Should include "/" at the end!
+	:param argv:
+	:return:
+	"""
+
+	# Variables that would be wanted displayed in a file name
+	# Listed are "defaults" that we wouldn't normally want to list them
+	# Some are deliberately zero so that they are always included in the filename, i.e. thickness
+	wants = {"D": 5e3, "w": model.radius * 1.25, "dx": 10, "dz": 10, "dt": model.dt, "kT": True,
+	         "radius": 2.4 * model.depth, "thickness": 0, "depth": 0, "Tsurf": 0,
+	         "Tbot": 0, "topBC": True, "sidesBC": "NoFlux"}
+
+	if 'frac_width' in model.__dict__.items():
+		# defaults["frac_width"] = model.frac_width
+		# defaults["frac_height"] = model.frac_height
+		wants["frac_width"] = model.frac_width
+		wants["frac_height"] = model.frac_height
+
 	if model.issalt:
-		defaults['C_rho'] = model.C_rho
-		defaults['Ci_rho'] = model.Ci_rho
-		defaults['saturated'] = model.saturated
-		defaults['rejection_cutoff'] = 0.25
-		defaults['composition'] = 0
-		defaults['concentration'] = 0
-		defaults['saturation_point'] = model.saturation_point
-	dict = {key: value for key, value in model.__dict__.items() if not key.startswith('__') and \
-	        not callable(key) and type(value) in [str, bool, int, float] and value != defaults[key]}
+		# defaults['C_rho'] = model.C_rho
+		# defaults['Ci_rho'] = model.Ci_rho
+		# defaults['rejection_cutoff'] = 0.25
+		# defaults['composition'] = 0
+		# defaults['concentration'] = 0
+		# defaults['saturation_point'] = model.saturation_point
+		wants['composition'] = 0
+		wants['concentration'] = 0
+	# try:
+	#	defaults['heat_from_precipitation'] = model.heat_from_precipitation
+	#	defaults['enthalpy_of_formation'] = model.enthalpy_of_formation
+	#	defaults['salinate'] = model.salinate
+	# except AttributeError:
+	#	pass
+
+	dict = {key: value for key, value in model.__dict__.items() if key in wants and value != wants[key]}
+	# dict = {key: value for key, value in model.__dict__.items() if not key.startswith('__') and \
+	#        not callable(key) and type(value) in [str, bool, int, float] and value != defaults[key]}
+
 	file_name = outputdir
-	print('naming file!')
+	if model.verbose: print(" file_namer-> naming file!")
 
 	def string_IO(input):
 		if isinstance(input, bool):
@@ -46,26 +71,28 @@ def file_namer(model, outputdir, *argv):
 		for var in argv:
 			print(var)
 			if var in dict.keys():
-				file_name += '_{}={}'.format(var, string_IO(dict[var]))
+				file_name += f"_{var}={dict[var]}"
 			else:
 				file_name += var
+
 	else:
 		for key in dict.keys():
-			if key in ['Lx', 'Lz', 'dx', 'dz', 'dt', 'kT', 'cpT', 'issalt', 'Tsurf', 'Tbot', 'depth', 'thickness',
-			           'R_int', 'composition', 'concentration', 'topBC', 'sidesBC', 'tidalheat']:
-				if isinstance(dict[key], float):
-					file_name += '_{}={:0.03f}'.format(key, dict[key])
-				else:
-					file_name += '_{}={}'.format(key, string_IO(dict[key]))
+			if isinstance(dict[key], float):
+				file_name += f"_{key}={dict[key]:0.01f}"
+			else:
+				file_name += f"_{key}={string_IO(dict[key])}"
+
 	return file_name + '.pkl'
 
 
 def save_data(data, file_name, outputdir, final=1, *argv):
-	import numpy as np
+	if outputdir[-1] != "/":
+		outputdir += "/"
 	if isinstance(data, (dict, list)) or type(data).__module__ == np.__name__:
 		file_name = outputdir + file_name + '.pkl'
 	elif final == 1:
 		file_name = file_namer(data, outputdir + file_name, *argv)
+		print(f'Saving as {file_name}')
 	elif final == 0:
 		file_name = outputdir + file_name
 	with open(file_name, 'wb') as output:
@@ -74,8 +101,15 @@ def save_data(data, file_name, outputdir, final=1, *argv):
 
 
 def load_data(file_name):
-	with open(file_name, 'rb') as input:
-		return pickle.load(input)
+	try:
+		with open(file_name, 'rb') as input:
+			return pickle.load(input)
+	except ValueError:
+		import pickle5 as p5
+		with open(file_name, 'rb') as input:
+			return p5.load(input)
+	except pickle.UnpicklingError:
+		print("Not working :(")
 
 
 def directory_spider(input_dir, path_pattern="", file_pattern="", maxResults=500000):
@@ -84,7 +118,7 @@ def directory_spider(input_dir, path_pattern="", file_pattern="", maxResults=500
 	'''
 	file_paths = []
 	if not os.path.exists(input_dir):
-		raise FileNotFoundError("Could not find path: %s" % (input_dir))
+		raise FileNotFoundError(f"Could not find path: {input_dir}")
 	for dirpath, dirnames, filenames in os.walk(input_dir):
 		if re.search(path_pattern, dirpath):
 			file_list = [item for item in filenames if re.search(file_pattern, item)]
@@ -137,3 +171,58 @@ def untar_file(tarfilename, outdir, which_file='_'):
 					filelist = extract_this.name
 	t.close()
 	return filelist
+
+
+def results_from_tar(md_filename, del_file=False):
+	"""
+	:param md_filename: str
+		Path + file name of model file that has an associated results file ("rs_runID") with an identifier like
+		"runIDWXYZ" in the string and in a subdirectory named "results"
+	:param del_file: bool
+		Whether to delete the untarred results file after loading. Default off
+	:return: dict
+		Dictionary file with structure {model property (temperature, salinity, etc): arr..} where arr can be a 3d
+		array with [time, z, x] as coordinates, a 1d array of [value] with time.
+	"""
+	# grab the unique runID number from the model filename md_filename
+	IDN = md_filename.find("runID")
+	IDN = md_filename[IDN:IDN + len("runIDXXXX")]
+	# get the directory that the model file is in
+	data_dir = md_filename[:md_filename.find("md")]
+	try:  # attempt to see if the file is already unzipped
+		filename = directory_spider(data_dir + "results/")
+		print("this is the filename:", filename)
+		# if its not, raise error and unzip it
+		if filename == []:
+			raise FileNotFoundError
+		# if it does exist, load the data
+		print(IDN)
+		print([f for f in filename if IDN in f])
+
+		try:
+			file_to_load = [f for f in filename if IDN in f][0]
+			results = load_data(file_to_load)
+		except IndexError:
+			try:
+				# file not already uncompressed, find the particular results file and uncompress it
+				file_to_load = untar_file(data_dir + "results.tar.gz", outdir=data_dir, which_file=md_filename)
+				results = load_data(data_dir + file_to_load)
+			except FileNotFoundError:
+				raise Exception("NO RESULTS FILES POSSIBLE!")
+
+	except FileNotFoundError or IndexError:
+		try:
+			# file not already uncompressed, find the particular results file and uncompress it
+			file_to_load = untar_file(data_dir + "results.tar.gz", outdir=data_dir, which_file=md_filename)
+			results = load_data(data_dir + file_to_load)
+		except FileNotFoundError:
+			raise Exception("NO RESULTS FILES POSSIBLE!")
+	if del_file:
+		print('data_dir', data_dir)
+		print('file_to_load', file_to_load)
+		print(f'together: {data_dir}{file_to_load}')
+		rmvfn = f'{data_dir}{file_to_load}'
+		if '//' in rmvfn:
+			rmvfn = file_to_load
+		os.remove(rmvfn)
+	return results
