@@ -262,6 +262,7 @@ class HeatSolver:
 		----------
 		None
 		"""
+    
 		z_newice, x_newice = np.where((phi_last > 0) & (self.phi == 0))
 		water = np.where(self.phi >= self.rejection_cutoff)
 		volume = water[1].shape[0]

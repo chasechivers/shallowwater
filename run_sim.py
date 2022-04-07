@@ -1,3 +1,4 @@
+# Example script
 from ShallowWater import ShallowWater as Model
 from utility_funcs import *
 import matplotlib.pyplot as plt
@@ -35,7 +36,9 @@ name = 'shallowwater_{comp}'  # unique identifier
 output_freq = 10 * 3.154e7  # output every 100 years
 simulation_time = 30e3 * 3.154e7  # run simulation for 200 thousand years
 
-md = Model(w=w, D=D, dx=dx, dz=dz, coordinates=coords, verbose=True)
+
+md = Model(w=w, D=D, dx=dx, dz=dz, verbose=True)
+# initialize system
 md.init_T(Tsurf=Tsurf, Tbot=Tbot)
 md.init_intrusion(depth=d, thickness=h, radius=R)  # , geometry="sheet")
 md.init_salinity(composition=comp, concentration=conc, shell=True)  # , use_interpolator=True)
@@ -45,14 +48,13 @@ md.set_outputs(output_frequency=int(output_freq / md.dt), tmp_dir=tmp_dir, tmp_f
 md.solve_heat(final_time=simulation_time)
 # Gather results outputs and save them
 rs = md.outputs.get_all_data(del_files=True)
-'''
 print('Saving model')
 save_data(md, 'md_{}'.format(md.outputs.tmp_data_file_name.split('tmp_data_')[1]), out_dir)
 print('Saving results')
 save_data(rs,
 		 'rs_{}'.format(md.outputs.tmp_data_file_name.split('tmp_data_')[1]),
 		 out_dir)
-'''
+
 # Plot a the x = dx slice of the temperature evolution over time
 plt.figure()
 # Temperature evolution over time

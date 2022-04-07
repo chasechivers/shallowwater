@@ -1,193 +1,324 @@
-import sys, getopt
+from argparse import ArgumentParser
 from utility_funcs import *
+import sys
+import os
+from ShallowWater import ShallowWater as Model
 
 
 def main(argv):
-	from IceSystem import IceSystem
-	import os
 	cwd = os.getcwd()
-	dir = '/tmp/'
-	# directory i use on the GATech PACE cluster
-	outputdirectory = '/nv/hp5/cchivers3/scratch/'
-	outlist = ['T', 'phi', 'Q']
-	Lz = 5e3
-	Lx = 6e3
-	dz = dx = 10
-	dt = 3.154e7 / 52
-	Tsurf = 110
-	Tbot = 273.15
-	Tint = Tbot
-	outputfreq = 50
-	rj = 0.25
-	ac = 567.
-	tidalheat = True
-	shell, salty, in_situ = False, False, False
-	composition, concentration = 0, 0
-	names = ''
-	cpT = False
-	geometry = 'ellipse'
-	Ttol, phitol, Stol = 0.1, 0.01, 1
-	X_symmetry = True
-	T_match = True
-	topBC, botBC = True, True
-	sidesBC = 'NoFlux'
-	optstr = 'command_line.py  -> options (see IceSystem/HeatSolver documentation (or the above) for ' \
-	         'defaults/options)\n' \
-	         'Computational Properties, \n' \
-	         '  --Lz, --Lx \t : depth and width sizes, m (float)\n' \
-	         '  --dz, --dx \t : vertical and horizontal step size, m  (int)\n' \
-	         '  --dt       \t : time step size, s (float)\n' \
-	         '  --x-symm   \t : exploit symmetry about x-axis, (binary)' \
-	         '  --Ttol     \t : temperature tolerance, K (float)\n' \
-	         '  --phitol   \t : liquid fraction tolerance, (float)\n' \
-	         '  --OF       \t : output frequency for results, /s (float)\n' \
-	         '  --names    \t : output data file name\n' \
-	         '  --topBC    \t : top boundary condition\n' \
-	         '  --botBC    \t : bottom boundary condition\n' \
-	         '  --sidesBC  \t : boundary condition on left and right sides\n' \
-	         'Initial properties, \n' \
-	         '  --Tsurf, --Tbot \t : surface and bottom of shell temperatures, K (float) \n' \
-	         '  --profile       \t : equilibrium temperature profile (string)\n' \
-	         '  --cpT           \t : temperature-dependence of specific heat, (binary)\n' \
-	         'Sill properties,\n' \
-	         '  --depth   \t : depth of upper edge of sill, m (float)\n' \
-	         '  --thick    \t : thickness of sill, m (float)\n' \
-	         '  --radius   \t : radius of sill, m (float)\n' \
-	         '  --geometry \t : sill geometry, (string)\n' \
-	         'Salinity options, \n' \
-	         '  --salt             \t : turn salinity on (1), necessary if using salinity, (binary)\n' \
-	         '  --composition      \t : composition of salt, (string)\n' \
-	         '  --concentration    \t : initital concentration of salt, ppt (float)\n' \
-	         '  --shell            \t : if 1, shell will have a salinity-depth profile according to composition, \n' \
-	         '  --T-match          \t : if 1, the bottom will match the salinity of the sill or shell (ocean below)' \
-	         'concentration, (binary)\n' \
-	         '  --rejection-cutoff \t : liquid fraction cut-off for brine drainage parameterization, (float)\n' \
-	         '  --in-situ-melt     \t : NOTE: shell option must be on. determines sill salinity by amount of salt ' \
-	         'in location of intrusion, (binary)\n' \
-	         '  --Stol             \t : salinity tolerance, ppt (float)'
 
-	try:
-		opts, args = getopt.getopt(argv, 'ho:v',
-		                           ['Lz=', 'Lx=', 'dz=', 'dx=', 'dt=', 'Tsurf=', 'Tbot=', 'depth=', 'thick=',
-		                            'radius=', 'composition=', 'concentration=', 'OF=', 'salt=', 'shell=',
-		                            'rejectioncutoff=', 'names=', 'in-situ-melt=', 'cpT=', 'geometry=',
-		                            'Ttol=', 'phitol=', 'Stol=', 'x-symm=', 'T-match=', 'topBC=', 'botBC=', 'sidesBC=',
-		                            'dL=', 'kconst=', 'tidalheat=', 'Tint='])
-	except getopt.GetoptError:
-		print(optstr)
-		sys.exit(2)
-	print(opts, args)
-	for opt, arg in opts:
-		if opt == '-h':
-			print(optstr)
-			sys.exit()
-		elif opt in ('--Tint', '--Tint='):
-			Tint = float(arg)
-		elif opt in ('--kconst', '--kconst='):
-			ac = float(arg)
-		elif opt in ('--tidalheat', '--tidalheat='):
-			tidalheat = bool(int(arg))
-		elif opt in ('--Lz', '--Lz='):
-			Lz = float(arg)
-		elif opt in ('--Lx', '--Lx='):
-			Lx = float(arg)
-		elif opt in ('--dz', '--dz='):
-			dz = float(arg)
-		elif opt in ('--dx', '--dx='):
-			dx = float(arg)
-		elif opt in ('--dt', '--dt='):
-			dt = float(arg)
-		elif opt in ('--Tsurf', '--Tsurf='):
-			Tsurf = float(arg)
-		elif opt in ('--Tbot', '--Tbot='):
-			Tbot = float(arg)
-		elif opt in ('--profile', '--profile='):
-			profile = str(arg)
-		elif opt in ('--depth', '--depth='):
-			depth = float(arg)
-		elif opt in ('--thick', '--thick='):
-			thickness = float(arg)
-		elif opt in ('--radius', '--radius='):
-			radius = float(arg)
-		elif opt in ('--salt', '--salt='):
-			salty = True
-		elif opt in ('--composition', '--composition='):
-			composition = arg
-		elif opt in ('--concentration', '--concentration='):
-			concentration = float(arg)
-		elif opt in ('--OF', '--OF='):
-			outputfreq = float(arg)
-		elif opt in ('--rejectioncutoff', '--rejectioncutoff='):
-			rj = float(arg)
-		elif opt in ('--shell', '--shell='):
-			shell = True
-		elif opt in ('--in-situ-melt', '--in-situ-melt=', '--in-situ', '--in-situ='):
-			in_situ = True
-		elif opt in ('--names', '--names='):
-			names = arg
-		elif opt in ('--cpT', '--cpT='):
-			cpT = bool(arg)
-		elif opt in ('--geometry', '--geometry='):
-			geometry = arg
-		elif opt in ('--Ttol=', '--Ttol'):
-			Ttol = arg
-		elif opt in ('--phitol=', '--phitol'):
-			phitol = arg
-		elif opt in ('--Stol=', '--Stol'):
-			Stol = arg
-		elif opt in ('--x-symm=', '--x-symm'):
-			X_symmetry = bool(arg)
-		elif opt in ('--T-match=', '--T-match'):
-			T_match = bool(int(arg))
-		elif opt in ('--topBC=', '--topBC'):
-			topBC = arg
-		elif opt in ('--botBC=', '--botBC'):
-			botBC = arg
-		elif opt in ('--sidesBC=', '--sidesBC'):
-			sidesBC = arg
-		elif opt in ('--dL=', '--dL'):
-			dL = float(arg)
-		else:
-			print(opt, arg)
-			assert False, 'unhandled option'
+	parser = ArgumentParser()
 
-	model = IceSystem(Lx=Lx, Lz=Lz, dx=dx, dz=dz, cpT=cpT, use_X_symmetry=X_symmetry)
-	model.init_T(Tsurf=Tsurf, Tbot=Tbot)
-	model.init_intrusion(Tint, depth, thickness, radius, geometry=geometry)
-	if salty:
-		model.init_salinity(concentration=concentration, composition=composition, rejection_cutoff=rj, shell=shell,
-		                    T_match=T_match, in_situ=in_situ)
-		outlist.append('S')
-	if sidesBC == 'RFlux':
-		model.set_boundaryconditions(sides=sidesBC, top=topBC, bottom=botBC, dL=dL)
+	############################
+	# NUMERICAL SETTINGS
+	############################
+	parser.add_argument("--D", "-D",
+	                    type=float,
+	                    default=10e3,
+	                    help="brittle ice thickness, m (10 km default)")
+	parser.add_argument("--w", "-w",
+	                    type=float,
+	                    default=None,
+	                    help="horizontal domain width, m (2.5 * Radius default)")
+	parser.add_argument("--dz", "-dz",
+	                    type=float,
+	                    default=10.,
+	                    help="vertical step size, m (10 m default)")
+	parser.add_argument("--dx", "-dx",
+	                    type=float,
+	                    default=10.,
+	                    help="horizontal step size, m (10 m default)")
+	parser.add_argument("--nz", "-nz",
+	                    type=int,
+	                    default=None,
+	                    help="number of grid points in z-direction, (None default, defaults to 10 m grid step sizes)")
+	parser.add_argument("--nx", "-nx",
+	                    type=int,
+	                    default=None,
+	                    help="number of grid points in x-direction, (None default, defaults to 10 m grid step sizes)")
+	parser.add_argument("--coordinates", "-coordinates", "--coords", "-coords",
+	                    type=str,
+	                    default="zx",
+	                    help="coordinate system used for simulation. Options are either cartesian (default) or "
+	                         "cylindrical",
+	                    choices=["cartesian", "xz", "cyl", "cylindrical", "zr", "rz"])
+	parser.add_argument("--dt", "-dt",
+	                    default="CFL",
+	                    help="time step size, s (CFL condition default, dt ~ min(dx,dz)^2 * rho * Cp / k_max / 12")
+	parser.add_argument("--adapt_dt", "-adapt_dt",
+	                    default=True,
+	                    help="set whether time step will adapt during simulation")
+	parser.add_argument("--nt", "-nt",
+	                    type=int,
+	                    default=None,  # int(200e3 * 3.154e7 / (3.154e7 / 52)),
+	                    help="number of time steps (200,000 years default). mutually exclusive with --simtime")
+	parser.add_argument("--simtime", "-st",
+	                    type=float,
+	                    default=200e3 * 3.154e7,
+	                    help="total time in seconds to run a simulation (200,000 years default). "
+	                         "mutually exclusive with --nt")
+	parser.add_argument("--freeze_stop", "-fs",
+	                    type=bool,
+	                    default=True,
+	                    help="set whether to stop when all water is frozen (default on)")
+	parser.add_argument("--x-symm", "-x-symm",
+	                    type=bool,
+	                    default=True,
+	                    help="exploit single sill symmetry about x-axis (bool) (default True)")
+	parser.add_argument("--Ttol", "-Ttol",
+	                    type=float,
+	                    default=0.1,
+	                    help="temperature tolerance, K (0.1 K default, absolute error)")
+	parser.add_argument("--phitol", "-phitol",
+	                    type=float,
+	                    default=0.01,
+	                    help="liquid fraction tolerance (0.01 default, absolute error)")
+	parser.add_argument("--topBC", "-topBC",
+	                    default=True,
+	                    help="top boundary condition (Dirichlet default)",
+	                    choices=[True, "Radiative"])
+	# extra keyword arguments for top boundary conditions
+	parser.add_argument("--use_orbits", "-use_orbits",
+	                    type=bool,
+	                    default=False,
+	                    help="set whether radiative boundary condition ")
+
+	parser.add_argument("--botBC", "-botBC",
+	                    default=True,
+	                    help="bottom boundary condition (Dirichlet default)",
+	                    choices=[True, "ConstFlux", "IceFlux", "OceanFlux"])
+	# extra keyword arguments for bottom boundary conditions
+	parser.add_argument("--qbot", "-qb",
+	                    type=float,
+	                    default=0.05, # W/m^2
+	                    help="choose bottom boundary flux when botBC='ConstFlux' [W/m^2]")
+	parser.add_argument("--Tbotbc", "-Tbbc",
+	                     type=float,
+	                     default=273.15,
+	                     help="choose 'ghost cell row' temperature for botBC='IceFlux' or "
+	                          "botBC='OceanFlux' [K]")
+
+	parser.add_argument("--sidesBC", "-sidesBC",
+	                    default="NoFlux",
+	                    help="vertical walls boundary conditions ('NoFlux' default)",
+	                    choices=[True, "NoFlux", "RFlux", "LNoFlux"])
+	# extra keyword arguments for side boundary conditions
+	parser.add_argument("--dL", "-dL",
+	                    type=float,
+	                    default=1e3,
+	                    help="distance right vertical wall from simulation for 'RFlux' boundary condition")
+
+
+	############################
+	# OUTPUT SETTINGS
+	############################
+	parser.add_argument("--names", "-names",
+	                    type=str,
+	                    help="output data file name (string)",
+	                    default=None)
+	parser.add_argument("--outlist", "-outlist",
+	                    type=list,
+	                    default=["T", "phi", "Q"],
+	                    help="arrays to output, list (default: ['T','phi','Q', 'time']")
+	parser.add_argument("--OF", "-OF",
+	                    type=float,
+	                    default=1000,
+	                    help="output frequency for results, /yr (1000 /yr default)")
+	parser.add_argument("--tmpdir", "-tmpdir",
+	                    type=str,
+	                    default="/tmp/",
+	                    help="directory for outputing temporary files")
+	parser.add_argument("--outdir", "-outdir",
+	                    type=str,
+	                    default="./results/",
+	                    help="directory for outputing results files")
+	parser.add_argument("--v", "-v",
+	                    type=bool,
+	                    default=1,
+	                    help="print options to screen. default on (-v 1)",
+	                    choices=[1, 0])
+
+	#############################
+	# INITIAL PHYSICAL PROPERTIES
+	#############################
+	parser.add_argument("--Tsurf", "-Tsurf",
+	                    type=float,
+	                    default=110.0,
+	                    help="ice shell surface temperature, K (110 K default)")
+	parser.add_argument("--Tbot", "-Tbot",
+	                    type=float,
+	                    default=273.15,
+	                    help="ice shell basal temperature, K (273.15 K default)")
+	parser.add_argument("--kconst", "-kconst",
+	                    type=float,
+	                    default=567.0,
+	                    help="constant for temperature-dependent conductivity, W/m (567 W/m default)")
+	parser.add_argument("--tidalheat", "-tidalheat",
+	                    type=bool,
+	                    default=True,
+	                    help="tidal heating (default on)",
+	                    choices=[0, 1])
+
+	############################
+	# SILL/WATER INTRUION PROPS
+	############################
+	parser.add_argument("--depth", "-d",
+	                    type=float,
+	                    default=1e3,
+	                    help="depth of upper surface of sill, m (1 km default)")
+	parser.add_argument("--thickness", "-H",
+	                    type=float,
+	                    default=0.5e3,
+	                    help="thickness of sill, m (500 m default)")
+	parser.add_argument("--radius", "-r",
+	                    type=float,
+	                    default=None,
+	                    help="radius of sill, m (default = 2.4 * depth)")
+	parser.add_argument("--geometry", "-geometry",
+	                    type=str,
+	                    default="ellipse",
+	                    help="assumed sill geometry (default 'ellipse')",
+	                    choices=["ellipse", "box", "chaos"])
+	parser.add_argument("--inner_radius", "-ir",
+	                    type=float,
+	                    default=0.2,
+	                    help="inside radius for the 'chaos' geometry, set default to (1 - inside_radius)*radius")
+
+	############################
+	# SALINITY/SALT OPTIONS
+	############################
+	parser.add_argument("--salt", "-S",
+	                    type=bool,
+	                    default=0,
+	                    help="turn salinity on (1), necessary if using salinity (default off 0)")
+	parser.add_argument("--composition", "-comp",
+	                    type=str,
+	                    default="MgSO4",
+	                    help="composition of salt (default 'MgSO4')",
+	                    choices=["MgSO4", "NaCl"])
+	parser.add_argument("--concentration", "-concentration",
+	                    type=float,
+	                    default=12.3,
+	                    help="concentration of salt, ppt (12.3 ppt default)")
+	parser.add_argument("--shell", "-shell",
+	                    type=bool,
+	                    default=True,
+	                    help="shell salinity-depth profile, 1 is on (default on: True)")
+	parser.add_argument("--Tmatch", "-Tmatch",
+	                    type=bool,
+	                    default=True,
+	                    help="bottom will match the salinity of the sill or shell (ocean below) concentration, "
+	                         "1 is on (default on unless '--Tbot' is called)")
+	parser.add_argument("--rejection-cutoff", "-rj",
+	                    type=float,
+	                    default=0.25,
+	                    help="liquid fraction cut-off for brine drainage parameterization (0.25 default)")
+	parser.add_argument("--in-situ-melt", "-in-situ-melt",
+	                    type=bool,
+	                    default=False,
+	                    help="determines sill salinity by amount of salt " \
+	                         "in location of intrusion. (default off False) NOTE: shell option must be on ('--shell 1')")
+	parser.add_argument("--Stol", "-Stol",
+	                    type=float,
+	                    default=1,
+	                    help="salinity tolerance, ppt (1 ppt default)")
+	parser.add_argument("--load", "-load",
+	                    type=str,
+	                    default=None,
+	                    help="Load a file to continue running simulation. Requires path and filename, e.g. --load "
+	                         "/Users/user/directory/md_runIDXXXX_.pkl")
+
+	args = parser.parse_args()
+	if args.load != None:
+		print(args.load)
+		print(">>> Loading file for simulation")
+		print(f"\t ...loading {args.load}")
+		model = load_data(args.load)
+		print(f"\t File loaded")
+		model._print_all_opts(int(args.simtime / model.dt) if args.nt is None else args.nt)
+		model.FREEZE_STOP = args.freeze_stop
+		model.solve_heat(dt=model.dt,
+		                 nt=args.nt if args.nt is not None else None,
+		                 final_time=args.simtime if args.nt is None else None,
+		                 save_progress=10 if (1 - model.phi.sum() / model.phi_initial.sum()) > 0.75 else 25)
+
 	else:
-		model.set_boundaryconditions(sides=sidesBC, top=topBC, bottom=botBC)
+		if args.radius == None: args.radius = 2.4 * args.depth
 
-	dtmax = min(dx, dz) ** 2 / (3 * model.k.max() ** 2 / (model.rhoc.min()))
-	if dt > 0.10 * dtmax:
-		print("--changing dt to meet max value\n  old dt = {}s \n  new dt = {}s".format(dt, 0.1 * dtmax))
-		dt = 0.1 * dtmax
-	dt = 3.154e7 / 52
+		if args.nx != None and args.nz != None:
+			args.dx, args.dz = None, None
+		model = Model(w=args.radius * 2.5 if args.w == None else args.w, D=args.D,
+		              dx=args.dx, dz=args.dz,
+		              nx=args.nx, nz=args.nz,
+		              use_X_symmetry=args.x_symm,
+		              kT=True if args.kconst > 0 else False,
+		              verbose=args.v,
+		              coordinates=args.coordinates)
 
-	model.outputs.choose(model, output_list=outlist, output_frequency=int(outputfreq * 3.154e7 / dt))
-	model.outputs.tmp_data_directory = cwd + dir
-	model.outputs.tmp_data_file_name = '{}_{}_{}_{}'.format(model.outputs.tmp_data_file_name, names, thickness, depth)
+		model.init_T(Tsurf=args.Tsurf, Tbot=args.Tbot)
+		if args.inner_radius == 0.2:
+			args.inner_radius = (1 - args.inner_radius) * args.radius
+		model.init_intrusion(depth=args.depth, thickness=args.thickness, radius=args.radius, geometry=args.geometry,
+		                     inner_radius=args.inner_radius)
 
-	print(model.outputs.tmp_data_file_name)
-	model.tidalheat = tidalheat
-	model.freezestop = 1
-	model.Ttol, model.phitol, model.Stol = Ttol, phitol, Stol
-	model.constants.ac = ac
+		if args.salt is True:
+			print(args.Tmatch)
+			model.init_salinity(composition=args.composition, concentration=args.concentration,
+			                    rejection_cutoff=args.rejection_cutoff, shell=args.shell,
+			                    T_match=False if args.Tbot != 273.15 else args.Tmatch,
+			                    in_situ=args.in_situ_melt)
+			args.outlist.append("S")
+		else:
+			pass
 
-	model.solve_heat(nt=5000000000000000000000000000, dt=dt)
-	print('  solved in {} s'.format(model.run_time))
-	model.outputs.transient_results = model.outputs.get_all_data(model)
-	print('saving data to ', outputdirectory)
-	print('   saving model')
-	save_data(model, 'md_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]), outputdirectory)
-	print('   saving results')
-	save_data(model.outputs.transient_results, 'rs_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]),
-	          outputdirectory)
+		# set the boundary conditions
+		model.set_boundaryconditions(sides=args.sidesBC, dL=args.dL,
+		                             top=args.topBC, use_orbits=args.use_orbits,
+		                             bottom=args.botBC, qbot=args.qbot, Tbot=args.Tbotbc)
+
+		print(args.dt, type(args.dt))
+
+		if args.dt == "min":
+			args.dt = 3.154e7 / 52
+		elif args.dt == "CFL":
+			args.dt = model.dt
+		else:
+			args.dt = float(args.dt)
+		print(args.dt, type(args.dt))
+		# create unique name for simulation outputs
+		if args.names is None:
+			args.names = "" + (args.composition if args.salt is True else "fr") + str(int(model.depth / 1e3)) + "_" \
+			             + ("eq" if args.Tsurf >= 90 else "") + ("pole" if args.Tsurf < 90 else "") + "_" \
+			             + str(int(args.thickness)) + "_" \
+			             + str(int(args.depth))
+		# set outputs
+		model.set_outputs(output_frequency=int(args.OF * 3.154e7 / args.dt),
+		                  outlist=args.outlist,
+		                  tmp_dir=cwd + args.tmpdir,
+		                  tmp_file_name=args.names)
+
+		# set options
+		model.TIDAL_HEAT = args.tidalheat
+		model.FREEZE_STOP = args.freeze_stop
+		model.ADAPT_DT = args.adapt_dt
+		model.TTOL = args.Ttol
+		model.PHITOL = args.phitol
+		model.STOL = args.Stol
+		model.constants.ac = args.kconst
+
+		# start simulation
+		model.solve_heat(dt=args.dt, nt=int(args.simtime / args.dt) if args.nt == None else args.nt)
+
+		print('  Solved in {} s'.format(model.run_time))
+		results = model.outputs.get_all_data(model)
+		print('Saving data to ', args.outdir)
+		print('   Saving model')
+		save_data(model, 'md_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]), args.outdir)
+		print('   Saving results to separate file))
+		save_data(results,
+		          'rs_{}'.format(model.outputs.tmp_data_file_name.split('tmp_data_')[1]),
+		          args.outdir)
 
 
 if __name__ == '__main__':
