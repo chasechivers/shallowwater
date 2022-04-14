@@ -24,15 +24,15 @@ dx = 50  # m, horizontal step size
 dz = 50  # m, vertical step size
 
 # set boundary conditions
-topBC = "Radiative"
-sidesBC = "NoFlux"
-bottomBC = True
+topBC = True  # constant surface temperature
+sidesBC = "NoFlux"  # no flux vertical boundaries
+bottomBC = True  # constant basal temperature
 qbot = 0
 
 # output choices
 tmp_dir = './tmp/'  # directory to save temporary files
 out_dir = './results/'  # directory to save final results/model file
-name = 'shallowwater_{comp}'  # unique identifier
+name = f'shallowwater_{comp}'  # unique identifier
 output_freq = 10 * 3.154e7  # output every 100 years
 simulation_time = 30e3 * 3.154e7  # run simulation for 200 thousand years
 
@@ -40,8 +40,8 @@ simulation_time = 30e3 * 3.154e7  # run simulation for 200 thousand years
 md = Model(w=w, D=D, dx=dx, dz=dz, verbose=True)
 # initialize system
 md.init_T(Tsurf=Tsurf, Tbot=Tbot)
-md.init_intrusion(depth=d, thickness=h, radius=R)  # , geometry="sheet")
-md.init_salinity(composition=comp, concentration=conc, shell=True)  # , use_interpolator=True)
+md.init_intrusion(depth=d, thickness=h, radius=R) 
+md.init_salinity(composition=comp, concentration=conc, shell=True) 
 
 md.set_boundaryconditions(top=topBC, sides=sidesBC, bottom=bottomBC)
 md.set_outputs(output_frequency=int(output_freq / md.dt), tmp_dir=tmp_dir, tmp_file_name=name)
@@ -52,8 +52,8 @@ print('Saving model')
 save_data(md, 'md_{}'.format(md.outputs.tmp_data_file_name.split('tmp_data_')[1]), out_dir)
 print('Saving results')
 save_data(rs,
-		 'rs_{}'.format(md.outputs.tmp_data_file_name.split('tmp_data_')[1]),
-		 out_dir)
+	  'rs_{}'.format(md.outputs.tmp_data_file_name.split('tmp_data_')[1]),
+	  out_dir)
 
 # Plot a the x = dx slice of the temperature evolution over time
 plt.figure()
